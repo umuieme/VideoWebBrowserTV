@@ -1,0 +1,25 @@
+# Gradle / build outputs
+.gradle/
+build/
+.kotlin/
+.externalNativeBuild
+.cxx
+/captures
+*.apk
+*.aab
+
+# Local machine config (SDK path, secrets)
+local.properties
+
+# Android Studio / IntelliJ: ignore everything except VCS mapping
+*.iml
+/.idea/*
+!/.idea/vcs.xml
+
+# Signing (never commit keystores or their passwords)
+*.jks
+*.keystore
+keystore.properties
+
+# OS
+.DS_Store
