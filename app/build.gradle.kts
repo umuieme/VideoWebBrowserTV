@@ -12,7 +12,9 @@ android {
     defaultConfig {
         applicationId = "com.umuieme.videowebbrowser"
         minSdk = 28
-        targetSdk = 37
+        // Deliberately below compileSdk: targetSdk 36+ turns on predictive back, which stops
+        // KEYCODE_BACK reaching dispatchKeyEvent. See CLAUDE.md > Decisions.
+        targetSdk = 35
         versionCode = 1
         versionName = "0.1.0"
 
@@ -45,9 +47,14 @@ dependencies {
 
     implementation(platform(libs.androidx.compose.bom))
     implementation(libs.androidx.compose.ui)
+    implementation(libs.androidx.compose.foundation)
     implementation(libs.androidx.compose.ui.tooling.preview)
     implementation(libs.androidx.tv.material)
     debugImplementation(libs.androidx.compose.ui.tooling)
+
+    implementation(libs.androidx.lifecycle.viewmodel.compose)
+    implementation(libs.androidx.lifecycle.runtime.compose)
+    implementation(libs.androidx.datastore.preferences)
 
     testImplementation(libs.junit)
     androidTestImplementation(libs.androidx.junit)

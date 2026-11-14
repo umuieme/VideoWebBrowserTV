@@ -16,11 +16,15 @@ public portfolio repo, so code quality, README and CI matter.
 - Manual dependency injection with a small AppContainer (no Hilt).
 - Settings stored with DataStore Preferences.
 - Injected JavaScript lives in assets/js/*.js, not inline strings.
-- minSdk 28; compileSdk and targetSdk track the latest stable Android release (currently 37);
+- minSdk 28; compileSdk tracks the latest stable Android release (currently 37);
   latest stable library versions; JDK 17; Gradle Kotlin DSL + version catalog.
+- targetSdk stays 35 for now: with 35, KEYCODE_BACK still reaches dispatchKeyEvent on all
+  devices. Raising to 36 enables predictive back and requires redesigning hold-Back = menu
+  (decide in Milestone 6).
 - The repo is generic ("tv-web-shell"): the site URL is set at first run, never hardcoded.
 - Only rely on remote keys every remote has: arrows, OK, Back, Play/Pause.
   Hold OK = scroll mode, hold Back = app menu.
+
 
 ## Planned packages
 ui/ (Compose screens, pointer overlay, menu), browser/ (WebView setup, navigation policy,
@@ -43,7 +47,14 @@ data/ (SettingsRepository), assets/js/.
 - Work in small steps. For each file you create or change, explain what the file or section
   is for and why each important part is there, the way a code walkthrough would. Don't just
   list the changes.
-- After each step, tell me how to verify it (build, run on TV, what I should see).
-- Never run `git push`, create GitHub repos, or change signing or secrets without asking first.
-- Don't add dependencies beyond what the current milestone needs.
-- Keep commits small, with conventional commit messages (feat:, chore:, fix:).
+- I do manual testing on the TV at the end, not after each milestone. After each step,
+  run ./gradlew assembleDebug lint test and fix failures, but don't ask me to test on
+  the TV.
+- Keep docs/TESTING.md up to date: for each milestone, add a section with the manual
+  test cases for the TV (steps + expected result), so I have one complete checklist for
+  final testing.- Don't add dependencies beyond what the current milestone needs.
+- Never run any git commands (add, commit, push, branch) and never create GitHub repos.
+  I handle version control myself.
+- Never change signing or secrets without asking first.
+- At the end of each step, suggest a conventional commit message (feat:, chore:, fix:)
+  that I can use.

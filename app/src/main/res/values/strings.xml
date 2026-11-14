@@ -1,10 +1,21 @@
 <resources>
     <string name="app_name">VideoWebBrowser</string>
-    <string name="version_label">Version %1$s</string>
-    <string name="focus_test_button">Test remote</string>
-    <string name="focus_test_hint">Press OK on the remote to test focus</string>
-    <plurals name="focus_test_count">
-        <item quantity="one">OK pressed %1$d time</item>
-        <item quantity="other">OK pressed %1$d times</item>
-    </plurals>
+
+    <!-- First-run setup -->
+    <string name="setup_title">Choose your website</string>
+    <string name="setup_explanation">Enter the address of the site you want to watch. It opens full screen every time you start the app.</string>
+    <string name="setup_url_label">Website address</string>
+    <string name="setup_url_placeholder">example.com</string>
+    <string name="setup_url_hint">Press OK to type</string>
+    <string name="setup_open">Open</string>
+    <string name="setup_error_blank">Enter a website address.</string>
+    <string name="setup_error_invalid">That doesn\'t look like a website address. Try something like example.com.</string>
+    <string name="setup_error_unsupported_scheme">Only http and https addresses are supported.</string>
+
+    <!-- Browser -->
+    <string name="browser_load_error_title">Couldn\'t load this page</string>
+    <string name="browser_retry">Retry</string>
+    <string name="webview_unavailable_title">Web browser component unavailable</string>
+    <string name="webview_unavailable_message">Android System WebView is missing, disabled or being updated. Wait a minute and try again, or check it under Settings › Apps.</string>
+    <string name="back_again_to_exit">Press Back again to exit</string>
 </resources>
