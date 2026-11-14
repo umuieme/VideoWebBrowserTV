@@ -1,0 +1,10 @@
+<resources>
+    <string name="app_name">VideoWebBrowser</string>
+    <string name="version_label">Version %1$s</string>
+    <string name="focus_test_button">Test remote</string>
+    <string name="focus_test_hint">Press OK on the remote to test focus</string>
+    <plurals name="focus_test_count">
+        <item quantity="one">OK pressed %1$d time</item>
+        <item quantity="other">OK pressed %1$d times</item>
+    </plurals>
+</resources>
