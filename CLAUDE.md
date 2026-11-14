@@ -52,7 +52,8 @@ data/ (SettingsRepository), assets/js/.
   the TV.
 - Keep docs/TESTING.md up to date: for each milestone, add a section with the manual
   test cases for the TV (steps + expected result), so I have one complete checklist for
-  final testing.- Don't add dependencies beyond what the current milestone needs.
+  final testing.
+- Don't add dependencies beyond what the current milestone needs.
 - Never run any git commands (add, commit, push, branch) and never create GitHub repos.
   I handle version control myself.
 - Never change signing or secrets without asking first.

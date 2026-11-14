@@ -65,6 +65,6 @@ object UrlNormalizer {
         if (host.equals("localhost", ignoreCase = true)) return true
         if (host.startsWith("[")) return true // IPv6 literal; URI already validated it.
         val labels = host.split('.')
-        return labels.size >= 2 && labels.none { it.isEmpty() }
+        return (labels.size >= 2) && labels.none { it.isEmpty() }
     }
 }

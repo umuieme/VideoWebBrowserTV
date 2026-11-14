@@ -39,6 +39,12 @@ android {
         compose = true
         buildConfig = true
     }
+
+    lint {
+        // targetSdk is intentionally held at 35 (see the comment on targetSdk above and
+        // CLAUDE.md > Decisions). Re-enable this check when that decision is revisited.
+        disable += "OldTargetApi"
+    }
 }
 
 dependencies {
