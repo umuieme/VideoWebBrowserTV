@@ -1,0 +1,62 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    Placeholder TV banner (320x180dp), shown in the Google TV launcher row.
+    Vector drawables can't render fonts, so the text "VIDEO WEB BROWSER" is drawn as stroked
+    paths. Replace in Milestone 7 via File > New > Image Asset > TV Banner.
+-->
+<!-- VectorRaster is ignored: minSdk 28 renders vectors natively, so no PNGs are generated. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools"
+    android:width="320dp"
+    tools:ignore="VectorRaster"
+    android:height="180dp"
+    android:viewportWidth="320"
+    android:viewportHeight="180">
+
+    <!-- Background -->
+    <path
+        android:fillColor="#FF121826"
+        android:pathData="M0,0 H320 V180 H0 Z" />
+
+    <!-- Accent strip along the bottom -->
+    <path
+        android:fillColor="#FFE53935"
+        android:pathData="M0,172 H320 V180 H0 Z" />
+
+    <!-- Play badge -->
+    <path
+        android:fillColor="#FFE53935"
+        android:pathData="M36,60 H72 A12,12 0 0 1 84,72 V108 A12,12 0 0 1 72,120 H36 A12,12 0 0 1 24,108 V72 A12,12 0 0 1 36,60 Z" />
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M46,74 L46,106 L71,90 Z" />
+
+    <!-- Line 1: VIDEO WEB -->
+    <path
+        android:strokeColor="#FFFFFFFF"
+        android:strokeWidth="3"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:pathData="M104,62 L111,84 L118,62
+            M131,62 L131,84 M126,62 L136,62 M126,84 L136,84
+            M144,62 L150,62 A8,11 0 0 1 150,84 L144,84 Z
+            M178,62 L164,62 L164,84 L178,84 M164,73 L174,73
+            M191,62 A7,11 0 1 1 191,84 A7,11 0 1 1 191,62 Z
+            M224,62 L227.5,84 L231,70 L234.5,84 L238,62
+            M258,62 L244,62 L244,84 L258,84 M244,73 L254,73
+            M264,84 L264,62 L271,62 A5,5.5 0 0 1 271,73 L264,73 M271,73 L272,73 A6,5.5 0 0 1 272,84 L264,84" />
+
+    <!-- Line 2: BROWSER -->
+    <path
+        android:strokeColor="#FFB0BEC5"
+        android:strokeWidth="3"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:pathData="M104,118 L104,96 L111,96 A5,5.5 0 0 1 111,107 L104,107 M111,107 L112,107 A6,5.5 0 0 1 112,118 L104,118
+            M124,118 L124,96 L132,96 A6,5.5 0 0 1 132,107 L124,107 M131,107 L138,118
+            M151,96 A7,11 0 1 1 151,118 A7,11 0 1 1 151,96 Z
+            M164,96 L167.5,118 L171,104 L174.5,118 L178,96
+            M197,99 Q195,96 191,96 Q184,96 184,101.5 Q184,107 191,107 Q198,107 198,112.5 Q198,118 191,118 Q187,118 185,115
+            M218,96 L204,96 L204,118 L218,118 M204,107 L214,107
+            M224,118 L224,96 L232,96 A6,5.5 0 0 1 232,107 L224,107 M231,107 L238,118" />
+</vector>
