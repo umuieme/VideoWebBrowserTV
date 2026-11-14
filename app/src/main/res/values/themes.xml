@@ -1,0 +1,9 @@
+<resources>
+    <!--
+        Window theme used before Compose draws its first frame. All real UI styling lives in
+        Compose (ui/theme/Theme.kt); this only avoids a white flash and hides the action bar.
+    -->
+    <style name="Theme.VideoWebBrowser" parent="android:Theme.Material.NoActionBar">
+        <item name="android:windowBackground">@android:color/black</item>
+    </style>
+</resources>
