@@ -63,7 +63,7 @@ covers what only a real TV and remote can verify.
 | 2.20 | `pm clear`, set up `https://nothing.invalid`. | The error panel appears (`net::ERR_NAME_NOT_RESOLVED`). |
 | 2.21 | (Optional, emulator only) Disable "Android System WebView" and launch. | "Web browser component unavailable" with Retry; no crash. |
 
-### Back (temporary, replaced in Milestone 6)
+### Back (temporary, replaced in Milestone 5)
 
 | # | Steps | Expected result |
 |---|-------|-----------------|
@@ -77,3 +77,60 @@ covers what only a real TV and remote can verify.
 | # | Steps | Expected result |
 |---|-------|-----------------|
 | 2.26 | With the Logcat filter above, load any page. | A line like `{"innerWidth":…,"innerHeight":…,"devicePixelRatio":…} url=…` per page load. Note the values for Milestone 3. |
+
+## Milestone 3: Pointer mode
+
+Notes:
+- Use the physical remote. Key events from `adb shell input keyevent` carry the virtual-keyboard
+  device id, which the app deliberately passes through, so they don't move the pointer.
+- Long-press OK logs only: `adb logcat -s PointerLayer`.
+- Good test pages: a site with a CSS hover menu (most news/shop sites), a video page whose player
+  hides its controls until hovered, and a page with a search box.
+
+### Movement
+
+| # | Steps | Expected result |
+|---|-------|-----------------|
+| 3.1 | Open the site and wait for it to load. | A white arrow pointer with a dark outline is in the centre of the screen. Easy to see from the couch. |
+| 3.2 | Tap Right once quickly (press and release). | The pointer moves a tiny step (about the width of the arrow's tail). Several taps give precise small steps. |
+| 3.3 | Hold Right for about 2 seconds. | After a short pause the pointer starts slowly, speeds up smoothly over about a second, then glides fast. No stutter. |
+| 3.4 | Hold Left, Up and Down in turn. | Same behaviour in every direction. |
+| 3.5 | Hold Up, then press and hold Right as well. | The pointer moves diagonally up-right at the same speed as a straight move. **Remote limitation:** many TV remotes report only one key at a time; if the pointer just switches to moving right, that is the remote, not the app. |
+| 3.6 | Hold an arrow until the pointer reaches the screen edge; keep holding. | The pointer stops with its tip at the edge and never leaves the screen. Nothing else happens yet (edge scrolling is planned for Milestone 4). |
+| 3.7 | Hold an arrow, then release it. | The pointer stops immediately; it does not drift. |
+| 3.8 | Hold an arrow and press Home while holding; release; reopen the app. | The pointer is not moving on return. |
+
+### Click and hover
+
+| # | Steps | Expected result |
+|---|-------|-----------------|
+| 3.9 | Move the pointer onto a link and press OK. | A short white ring pulses at the tip and the link opens. |
+| 3.10 | Move the pointer over a menu that opens on mouse hover. | The menu opens while the pointer is over it, without pressing OK. |
+| 3.11 | On a video page, move the pointer over the paused player. | The player's controls appear. |
+| 3.12 | Click the player's play button (or the video itself). | The video starts playing, with sound. |
+| 3.13 | Click the site's fullscreen button on the player, if it has one. | The site's fullscreen request is accepted (full-screen video handling itself is Milestone 5). Back still works. |
+| 3.14 | Click a text field (e.g. the search box). | The on-screen keyboard opens. |
+| 3.15 | Type a word with the keyboard and submit (Go/Search key). | The text appears in the field and the search runs. |
+| 3.16 | With the keyboard open, use the arrows. | The arrows move within the keyboard, not the pointer. |
+| 3.17 | Press Back to close the keyboard, then move the pointer and click the field again. | The pointer moves normally after the keyboard closes; clicking reopens the keyboard. |
+| 3.18 | Hold OK for about 1 second, then release. | No click happens. Logcat shows `Long-press OK`. |
+| 3.19 | Click a link and wait for the new page to load. | The pointer is still where it was before the page changed (not re-centred). |
+
+### Auto-hide
+
+| # | Steps | Expected result |
+|---|-------|-----------------|
+| 3.20 | Leave the remote alone for 5 seconds. | The pointer fades out smoothly. Any open hover menu stays open. |
+| 3.21 | After 3.20, press any arrow. | The pointer reappears instantly at the same place and moves. |
+| 3.22 | After 3.20, press OK once. | The pointer reappears but nothing is clicked. A second OK clicks. |
+| 3.23 | Keep holding an arrow for longer than 5 seconds. | The pointer never fades while moving. |
+
+### Other screens keep normal focus navigation
+
+| # | Steps | Expected result |
+|---|-------|-----------------|
+| 3.24 | `pm clear`, launch the app. | Setup screen: no pointer; Up/Down move focus between the URL box and "Open" as in 2.2. |
+| 3.25 | On the setup screen, highlight "Open" with a valid URL and press OK. | The site opens; the OK release does **not** click anything on the new page. |
+| 3.26 | Trigger a load error (as in 2.18). | Error panel with no pointer; Retry is focused and OK presses it. |
+| 3.27 | After Retry succeeds. | The pointer is back, at the position it had before the error. |
+| 3.28 | On any page, press Back. | Back behaves exactly as in 2.22–2.25 (pointer mode doesn't touch Back). |

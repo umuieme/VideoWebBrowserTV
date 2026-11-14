@@ -8,8 +8,8 @@ import androidx.activity.OnBackPressedCallback
 import com.umuieme.videowebbrowser.R
 
 /**
- * TEMPORARY (Milestone 2). Milestone 6 replaces this with real Back handling: close site popups
- * first, hold Back = app menu.
+ * TEMPORARY (Milestone 2). Milestone 5 replaces this with real Back handling (close site popups
+ * first); hold Back = app menu arrives with the menu in Milestone 6.
  *
  * Back goes back in WebView history when possible; otherwise the first press shows a toast and
  * a second press within [EXIT_WINDOW_MS] exits.

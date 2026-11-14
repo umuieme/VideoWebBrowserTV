@@ -46,16 +46,21 @@ import androidx.tv.material3.Text
 import com.umuieme.videowebbrowser.R
 import com.umuieme.videowebbrowser.browser.PageListener
 import com.umuieme.videowebbrowser.browser.WebViewFactory
+import com.umuieme.videowebbrowser.input.KeyRouter
+import com.umuieme.videowebbrowser.ui.pointer.PointerLayer
+import com.umuieme.videowebbrowser.ui.pointer.PointerState
 
 /**
  * Full-screen WebView showing [url], with a thin progress bar and a main-frame error panel.
  *
+ * @param keyRouter where pointer mode registers for remote keys while the page is shown.
  * @param onWebViewChanged receives the live WebView (or null when it goes away) so the
  *   Activity's Back handling can call canGoBack/goBack.
  */
 @Composable
 fun BrowserScreen(
     url: String,
+    keyRouter: KeyRouter,
     onWebViewChanged: (WebView?) -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -78,7 +83,7 @@ fun BrowserScreen(
             )
         } else {
             key(webView) {
-                WebViewHost(webView, url, pageState, onWebViewChanged)
+                WebViewHost(webView, url, pageState, keyRouter, onWebViewChanged)
             }
         }
     }
@@ -89,9 +94,13 @@ private fun BoxScope.WebViewHost(
     webView: WebView,
     url: String,
     pageState: PageState,
+    keyRouter: KeyRouter,
     onWebViewChanged: (WebView?) -> Unit,
 ) {
     val lifecycleOwner = LocalLifecycleOwner.current
+    // Remembered here (per WebView), not inside PointerLayer: the pointer keeps its position
+    // across page loads and across an error panel coming and going.
+    val pointerState = remember(webView) { PointerState() }
     val currentOnWebViewChanged by rememberUpdatedState(onWebViewChanged)
     val error = pageState.mainFrameError
 
@@ -154,7 +163,16 @@ private fun BoxScope.WebViewHost(
         modifier = Modifier.align(Alignment.TopStart),
     )
 
-    if (error != null) {
+    // Pointer mode only while the page itself is visible. With the error panel up, the layer
+    // leaves composition, its key handler unregisters, and Retry gets normal D-pad focus.
+    if (error == null) {
+        PointerLayer(
+            target = webView,
+            state = pointerState,
+            keyRouter = keyRouter,
+            modifier = Modifier.fillMaxSize(),
+        )
+    } else {
         MessagePanel(
             title = stringResource(R.string.browser_load_error_title),
             message = error.description,

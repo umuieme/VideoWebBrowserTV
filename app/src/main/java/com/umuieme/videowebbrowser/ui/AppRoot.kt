@@ -10,6 +10,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.umuieme.videowebbrowser.input.KeyRouter
 
 /**
  * Picks the screen from the ViewModel's state. With three screens and no back stack between
@@ -18,6 +19,7 @@ import androidx.lifecycle.viewmodel.compose.viewModel
  */
 @Composable
 fun AppRoot(
+    keyRouter: KeyRouter,
     onWebViewChanged: (WebView?) -> Unit,
     viewModel: BrowserViewModel = viewModel(factory = BrowserViewModel.Factory),
 ) {
@@ -34,6 +36,7 @@ fun AppRoot(
         )
         is BrowserUiState.Browsing -> BrowserScreen(
             url = state.url,
+            keyRouter = keyRouter,
             onWebViewChanged = onWebViewChanged,
         )
     }
