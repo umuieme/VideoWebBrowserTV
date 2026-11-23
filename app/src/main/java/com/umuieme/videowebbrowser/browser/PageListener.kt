@@ -13,4 +13,10 @@ interface PageListener {
 
     /** The top-level page failed to load (no network, DNS failure, timeout...). */
     fun onMainFrameError(failedUrl: String, description: String)
+
+    /**
+     * The WebView's renderer process crashed or was killed (usually out of memory). The WebView
+     * is dead: it must be removed and destroyed, and a new one created to continue.
+     */
+    fun onRenderProcessGone()
 }

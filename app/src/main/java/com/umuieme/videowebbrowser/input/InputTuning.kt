@@ -35,6 +35,26 @@ object InputTuning {
     /** OK held at least this long is a long press instead of a click. */
     const val LONG_PRESS_MS = 500L
 
+    // --- Full-screen video seeking (RemoteInputController) ---
+
+    /** Seconds per Left/Right press, and per repeat step while held. Also FF/Rewind keys. */
+    const val SEEK_STEP_SEC = 10
+
+    /** Seconds per repeat step once Left/Right has been held for [SEEK_ACCELERATE_AFTER_MS]. */
+    const val SEEK_STEP_FAST_SEC = 30
+
+    /** Pause after the first seek before a held key starts repeating. Keeps single taps single. */
+    const val SEEK_REPEAT_DELAY_MS = 500L
+
+    /**
+     * Time between repeat steps while held. Each step is a real seek in the player (buffer
+     * flush and refetch), so much faster than this makes players stall instead of seek faster.
+     */
+    const val SEEK_REPEAT_INTERVAL_MS = 400L
+
+    /** How long Left/Right must be held before steps grow to [SEEK_STEP_FAST_SEC]. */
+    const val SEEK_ACCELERATE_AFTER_MS = 2_000L
+
     // --- Injection (InputInjector) ---
 
     /** Time between the synthetic touch DOWN and UP of a click. */
@@ -43,7 +63,7 @@ object InputTuning {
     /** Minimum time between hover moves: 33 ms is about 30 Hz, plenty for CSS :hover and players. */
     const val HOVER_MIN_INTERVAL_MS = 33L
 
-    // --- Visibility (PointerLayer) ---
+    // --- Visibility (RemoteInputLayer) ---
 
     /** The pointer fades out after this long without pointer activity. */
     const val IDLE_HIDE_MS = 5_000L

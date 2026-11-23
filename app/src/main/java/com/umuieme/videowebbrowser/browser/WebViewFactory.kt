@@ -8,6 +8,7 @@ import android.webkit.CookieManager
 import android.webkit.WebSettings
 import android.webkit.WebView
 import com.umuieme.videowebbrowser.BuildConfig
+import com.umuieme.videowebbrowser.browser.media.MediaController
 
 /**
  * The one place a WebView is created and configured, so every setting is visible together.
@@ -16,6 +17,7 @@ object WebViewFactory {
 
     private const val TAG = "WebViewFactory"
     private const val CALIBRATION_ASSET = "js/calibration.js"
+    private const val MEDIA_AGENT_ASSET = "js/media-agent.js"
 
     /**
      * Creates a configured WebView, or a failure if the system WebView provider is missing,
@@ -23,12 +25,19 @@ object WebViewFactory {
      * instead of returning, and an uncaught throw would crash the app on launch.
      *
      * @param context must be the Activity context: the WebView uses it for IME, dialogs and theming.
+     * @param fullscreenHost receives full-screen video requests.
+     * @param mediaController gets the media agent installed into this WebView.
      */
-    fun create(context: Context, listener: PageListener): Result<WebView> =
+    fun create(
+        context: Context,
+        listener: PageListener,
+        fullscreenHost: FullscreenHost,
+        mediaController: MediaController,
+    ): Result<WebView> =
         try {
             val webView = WebView(context)
             try {
-                webView.configure(listener)
+                webView.configure(listener, fullscreenHost, mediaController)
             } catch (e: Exception) {
                 webView.destroy() // Don't leak a half-configured instance.
                 throw e
@@ -41,7 +50,11 @@ object WebViewFactory {
 
     // JavaScript is required: practically every video site is a JS app.
     @SuppressLint("SetJavaScriptEnabled")
-    private fun WebView.configure(listener: PageListener) {
+    private fun WebView.configure(
+        listener: PageListener,
+        fullscreenHost: FullscreenHost,
+        mediaController: MediaController,
+    ) {
         settings.apply {
             // Run site JavaScript; video players, menus and most navigation depend on it.
             javaScriptEnabled = true
@@ -84,13 +97,24 @@ object WebViewFactory {
         isFocusable = true
         isFocusableInTouchMode = true
 
-        webViewClient = BrowserWebViewClient(listener, loadCalibrationScript(context))
-        webChromeClient = BrowserWebChromeClient(listener)
+        // Before any loadUrl: document-start scripts and message listeners only apply to
+        // documents created after they are added.
+        mediaController.install(this, loadAsset(context, MEDIA_AGENT_ASSET))
+
+        webViewClient = BrowserWebViewClient(
+            listener = listener,
+            calibrationScript = loadCalibrationScript(context),
+            onMainFrameStarted = mediaController::onMainFrameNavigation,
+        )
+        webChromeClient = BrowserWebChromeClient(listener, fullscreenHost)
     }
+
+    private fun loadAsset(context: Context, path: String): String =
+        context.assets.open(path).bufferedReader().use { it.readText() }
 
     /** Debug builds only; release builds skip this, so the calibration code never runs there. */
     private fun loadCalibrationScript(context: Context): String? {
         if (!BuildConfig.DEBUG) return null
-        return context.assets.open(CALIBRATION_ASSET).bufferedReader().use { it.readText() }
+        return loadAsset(context, CALIBRATION_ASSET)
     }
 }

@@ -3,6 +3,8 @@ package com.umuieme.videowebbrowser.input
 import com.umuieme.videowebbrowser.input.InputCommand.Click
 import com.umuieme.videowebbrowser.input.InputCommand.DirectionsChanged
 import com.umuieme.videowebbrowser.input.InputCommand.LongPressOk
+import com.umuieme.videowebbrowser.input.InputCommand.Media
+import com.umuieme.videowebbrowser.input.InputCommand.PointerVisibility
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
@@ -108,11 +110,28 @@ class RemoteInputControllerTest {
     }
 
     @Test
-    fun `media keys pass through in pointer mode`() {
-        assertFalse(controller.onKeyDown(RemoteKey.PlayPause, 0).consumed)
-        assertFalse(controller.onKeyUp(RemoteKey.PlayPause, 50).consumed)
-        assertFalse(controller.onKeyDown(RemoteKey.FastForward, 0).consumed)
-        assertFalse(controller.onKeyDown(RemoteKey.Rewind, 0).consumed)
+    fun `media keys become media commands in pointer mode`() {
+        assertEquals(listOf(Media(MediaAction.TogglePlay)), controller.onKeyDown(RemoteKey.PlayPause, 0).commands)
+        assertEquals(KeyResult.ConsumedNoOp, controller.onKeyUp(RemoteKey.PlayPause, 50))
+        assertEquals(listOf(Media(MediaAction.Play)), controller.onKeyDown(RemoteKey.Play, 100).commands)
+        assertEquals(listOf(Media(MediaAction.Pause)), controller.onKeyDown(RemoteKey.Pause, 200).commands)
+        assertEquals(listOf(Media(MediaAction.SeekBy(10))), controller.onKeyDown(RemoteKey.FastForward, 300).commands)
+        assertEquals(listOf(Media(MediaAction.SeekBy(-10))), controller.onKeyDown(RemoteKey.Rewind, 400).commands)
+    }
+
+    @Test
+    fun `media key auto-repeat does not toggle again`() {
+        controller.onKeyDown(RemoteKey.PlayPause, 0)
+        assertEquals(KeyResult.ConsumedNoOp, controller.onKeyDown(RemoteKey.PlayPause, 500, isRepeat = true))
+    }
+
+    @Test
+    fun `media keys work in both full-screen modes`() {
+        controller.enterFullscreen()
+        assertEquals(listOf(Media(MediaAction.TogglePlay)), controller.onKeyDown(RemoteKey.PlayPause, 0).commands)
+        controller.onKeyDown(RemoteKey.Up, 10)
+        assertEquals(InputMode.FullscreenPointer, controller.mode)
+        assertEquals(listOf(Media(MediaAction.Pause)), controller.onKeyDown(RemoteKey.Pause, 20).commands)
     }
 
     @Test
@@ -131,11 +150,158 @@ class RemoteInputControllerTest {
 
     @Test
     fun `unimplemented modes pass keys through`() {
-        for (mode in listOf(InputMode.Scroll, InputMode.FullscreenVideo, InputMode.DPad)) {
+        for (mode in listOf(InputMode.Scroll, InputMode.DPad)) {
             val c = RemoteInputController(initialMode = mode)
             assertFalse(c.onKeyDown(RemoteKey.Up, 0).consumed)
             assertFalse(c.onKeyUp(RemoteKey.Ok, 0).consumed)
+            assertFalse(c.onKeyDown(RemoteKey.PlayPause, 0).consumed)
         }
+    }
+
+    // --- Full-screen video ---
+
+    @Test
+    fun `entering full screen switches to video control and hides the pointer`() {
+        controller.onKeyDown(RemoteKey.Left, 0) // held in pointer mode
+        val commands = controller.enterFullscreen()
+        assertEquals(listOf(DirectionsChanged(emptySet()), PointerVisibility(false)), commands)
+        assertEquals(InputMode.FullscreenVideo, controller.mode)
+    }
+
+    @Test
+    fun `OK toggles play on key down and its up is swallowed`() {
+        controller.enterFullscreen()
+        val down = controller.onKeyDown(RemoteKey.Ok, 0)
+        assertEquals(listOf(Media(MediaAction.TogglePlay)), down.commands)
+        assertTrue(controller.onKeyDown(RemoteKey.Ok, 400, isRepeat = true).commands.isEmpty())
+        assertEquals(KeyResult.ConsumedNoOp, controller.onKeyUp(RemoteKey.Ok, 600))
+        // No long press in video mode.
+        assertNull(controller.nextDeadlineMs)
+    }
+
+    @Test
+    fun `OK pressed in pointer mode and released in full screen does nothing`() {
+        // The OK that clicked the site's full-screen button.
+        controller.onKeyDown(RemoteKey.Ok, 0)
+        controller.enterFullscreen()
+        assertEquals(KeyResult.ConsumedNoOp, controller.onKeyUp(RemoteKey.Ok, 100))
+    }
+
+    @Test
+    fun `left and right seek by 10 seconds`() {
+        controller.enterFullscreen()
+        assertEquals(listOf(Media(MediaAction.SeekBy(-10))), controller.onKeyDown(RemoteKey.Left, 0).commands)
+        controller.onKeyUp(RemoteKey.Left, 100)
+        assertNull(controller.nextDeadlineMs)
+        assertEquals(listOf(Media(MediaAction.SeekBy(10))), controller.onKeyDown(RemoteKey.Right, 200).commands)
+    }
+
+    @Test
+    fun `held right repeats every interval and steps up to 30 s after 2 s`() {
+        controller.enterFullscreen()
+        controller.onKeyDown(RemoteKey.Right, 0)
+        // Auto-repeat DOWNs never seek; only ticks do.
+        assertTrue(controller.onKeyDown(RemoteKey.Right, 50, isRepeat = true).commands.isEmpty())
+
+        assertEquals(InputTuning.SEEK_REPEAT_DELAY_MS, controller.nextDeadlineMs)
+        assertTrue(controller.onTick(InputTuning.SEEK_REPEAT_DELAY_MS - 1).isEmpty())
+
+        var t = InputTuning.SEEK_REPEAT_DELAY_MS
+        val steps = mutableListOf<Int>()
+        while (t <= 3_000) {
+            controller.onTick(t).forEach { steps += ((it as Media).action as MediaAction.SeekBy).seconds }
+            t = controller.nextDeadlineMs!!
+        }
+        // 500, 900, 1300, 1700 ms -> 10 s; 2100, 2500, 2900 ms -> 30 s.
+        assertEquals(listOf(10, 10, 10, 10, 30, 30, 30), steps)
+
+        controller.onKeyUp(RemoteKey.Right, t)
+        assertNull(controller.nextDeadlineMs)
+        assertTrue(controller.onTick(t + 1_000).isEmpty())
+    }
+
+    @Test
+    fun `a late tick seeks once, not in a burst`() {
+        controller.enterFullscreen()
+        controller.onKeyDown(RemoteKey.Left, 0)
+        val commands = controller.onTick(1_500) // three intervals late
+        assertEquals(listOf(Media(MediaAction.SeekBy(-10))), commands)
+        assertEquals(1_500 + InputTuning.SEEK_REPEAT_INTERVAL_MS, controller.nextDeadlineMs)
+    }
+
+    @Test
+    fun `releasing the other direction does not stop a held seek`() {
+        controller.enterFullscreen()
+        controller.onKeyDown(RemoteKey.Right, 0)
+        controller.onKeyUp(RemoteKey.Left, 10)
+        assertEquals(InputTuning.SEEK_REPEAT_DELAY_MS, controller.nextDeadlineMs)
+    }
+
+    @Test
+    fun `up or down switches to the pointer, whose stray key up is ignored`() {
+        controller.enterFullscreen()
+        val down = controller.onKeyDown(RemoteKey.Down, 0)
+        assertEquals(listOf(PointerVisibility(true)), down.commands)
+        assertEquals(InputMode.FullscreenPointer, controller.mode)
+        assertEquals(KeyResult.ConsumedNoOp, controller.onKeyUp(RemoteKey.Down, 100))
+    }
+
+    @Test
+    fun `pointer over the video moves and clicks like pointer mode`() {
+        controller.enterFullscreen()
+        controller.onKeyDown(RemoteKey.Up, 0)
+        controller.onKeyUp(RemoteKey.Up, 50)
+
+        assertEquals(listOf(DirectionsChanged(setOf(Direction.Right))), controller.onKeyDown(RemoteKey.Right, 100).commands)
+        controller.onKeyUp(RemoteKey.Right, 200)
+        controller.onKeyDown(RemoteKey.Ok, 300)
+        assertEquals(listOf(Click), controller.onKeyUp(RemoteKey.Ok, 400).commands)
+    }
+
+    @Test
+    fun `long OK over the video neither clicks nor long-presses`() {
+        controller.enterFullscreen()
+        controller.onKeyDown(RemoteKey.Up, 0)
+        controller.onKeyDown(RemoteKey.Ok, 100)
+        assertTrue(controller.onTick(600).isEmpty())
+        assertTrue(controller.onKeyUp(RemoteKey.Ok, 900).commands.isEmpty())
+    }
+
+    @Test
+    fun `back in pointer-over-video returns to video control`() {
+        controller.enterFullscreen()
+        controller.onKeyDown(RemoteKey.Up, 0)
+        controller.onKeyDown(RemoteKey.Left, 10) // moving when Back arrives
+
+        val back = controller.onFullscreenBack()
+        assertTrue(back.consumed)
+        assertEquals(listOf(DirectionsChanged(emptySet()), PointerVisibility(false)), back.commands)
+        assertEquals(InputMode.FullscreenVideo, controller.mode)
+    }
+
+    @Test
+    fun `back in video control is left to the caller to exit full screen`() {
+        controller.enterFullscreen()
+        controller.onKeyDown(RemoteKey.Right, 0)
+        assertFalse(controller.onFullscreenBack().consumed)
+        assertEquals(InputMode.FullscreenVideo, controller.mode)
+    }
+
+    @Test
+    fun `exiting full screen returns to pointer mode and stops seeking`() {
+        controller.enterFullscreen()
+        controller.onKeyDown(RemoteKey.Right, 0)
+        controller.exitFullscreen()
+        assertEquals(InputMode.Pointer, controller.mode)
+        assertNull(controller.nextDeadlineMs)
+        // The Right UP that follows is an orphan in pointer mode.
+        assertEquals(KeyResult.ConsumedNoOp, controller.onKeyUp(RemoteKey.Right, 100))
+    }
+
+    @Test
+    fun `exit full screen outside full screen is a no-op`() {
+        assertTrue(controller.exitFullscreen().isEmpty())
+        assertEquals(InputMode.Pointer, controller.mode)
     }
 
     @Test

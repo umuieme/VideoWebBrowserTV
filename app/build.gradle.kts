@@ -61,8 +61,12 @@ dependencies {
     implementation(libs.androidx.lifecycle.viewmodel.compose)
     implementation(libs.androidx.lifecycle.runtime.compose)
     implementation(libs.androidx.datastore.preferences)
+    // Document-start script injection and a per-frame message channel for the media agent.
+    implementation(libs.androidx.webkit)
 
     testImplementation(libs.junit)
+    // Real org.json for local unit tests: android.jar only has stubs that throw at runtime.
+    testImplementation(libs.org.json)
     androidTestImplementation(libs.androidx.junit)
     androidTestImplementation(libs.androidx.espresso.core)
 }

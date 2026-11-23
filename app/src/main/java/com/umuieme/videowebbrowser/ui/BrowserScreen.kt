@@ -1,7 +1,11 @@
 package com.umuieme.videowebbrowser.ui
 
+import android.app.Activity
+import android.content.Context
+import android.content.ContextWrapper
 import android.view.View
 import android.view.ViewGroup
+import android.view.Window
 import android.webkit.WebView
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.background
@@ -9,6 +13,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -33,22 +38,31 @@ import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
+import androidx.core.view.WindowCompat
+import androidx.core.view.WindowInsetsCompat
+import androidx.core.view.WindowInsetsControllerCompat
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.tv.material3.Button
 import androidx.tv.material3.MaterialTheme
 import androidx.tv.material3.Text
 import com.umuieme.videowebbrowser.R
+import com.umuieme.videowebbrowser.browser.FullscreenSession
+import com.umuieme.videowebbrowser.browser.FullscreenVideoState
 import com.umuieme.videowebbrowser.browser.PageListener
 import com.umuieme.videowebbrowser.browser.WebViewFactory
+import com.umuieme.videowebbrowser.browser.media.MediaController
 import com.umuieme.videowebbrowser.input.KeyRouter
-import com.umuieme.videowebbrowser.ui.pointer.PointerLayer
 import com.umuieme.videowebbrowser.ui.pointer.PointerState
+import com.umuieme.videowebbrowser.ui.video.OsdState
+import com.umuieme.videowebbrowser.ui.video.VideoOsd
 
 /**
  * Full-screen WebView showing [url], with a thin progress bar and a main-frame error panel.
@@ -56,22 +70,32 @@ import com.umuieme.videowebbrowser.ui.pointer.PointerState
  * @param keyRouter where pointer mode registers for remote keys while the page is shown.
  * @param onWebViewChanged receives the live WebView (or null when it goes away) so the
  *   Activity's Back handling can call canGoBack/goBack.
+ * @param onChangeSite offered on every error panel, so a site that never loads can't trap the
+ *   user (the URL is saved, so restarting the app would just open it again).
  */
 @Composable
 fun BrowserScreen(
     url: String,
     keyRouter: KeyRouter,
     onWebViewChanged: (WebView?) -> Unit,
+    onChangeSite: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val context = LocalContext.current
     val pageState = remember { PageState() }
-    // Bumped by "Retry" on the unavailable screen to attempt creating the WebView again.
+    // Bumped by "Retry" (WebView unavailable, or its renderer died) to create a new WebView.
     var creationAttempt by rememberSaveable { mutableIntStateOf(0) }
+
+    // Per WebView: full-screen video state and the media agent's controller. Both hold
+    // references tied to one WebView instance (its custom view, its frames' reply proxies).
+    val fullscreen = remember(creationAttempt) { FullscreenVideoState() }
+    val mediaController = remember(creationAttempt) { MediaController() }
 
     // Created once per attempt and kept across recompositions. Never create a WebView inside
     // AndroidView's update block or the composable body: that would rebuild it and reload the page.
-    val webViewResult = remember(creationAttempt) { WebViewFactory.create(context, pageState) }
+    val webViewResult = remember(creationAttempt) {
+        WebViewFactory.create(context, pageState, fullscreen, mediaController)
+    }
 
     Box(modifier = modifier.fillMaxSize().background(Color.Black)) {
         val webView = webViewResult.getOrNull()
@@ -80,10 +104,27 @@ fun BrowserScreen(
                 title = stringResource(R.string.webview_unavailable_title),
                 message = stringResource(R.string.webview_unavailable_message),
                 onRetry = { creationAttempt++ },
+                onChangeSite = onChangeSite,
+            )
+        } else if (pageState.rendererGone) {
+            // Leaving WebViewHost out of composition runs its onDispose, which removes and
+            // destroys the dead WebView. Retry builds a new one. No automatic reload: a page that
+            // crashes the renderer every time would otherwise loop forever.
+            MessagePanel(
+                title = stringResource(R.string.renderer_gone_title),
+                message = stringResource(R.string.renderer_gone_message),
+                onRetry = {
+                    pageState.rendererGone = false
+                    creationAttempt++
+                },
+                onChangeSite = onChangeSite,
             )
         } else {
             key(webView) {
-                WebViewHost(webView, url, pageState, keyRouter, onWebViewChanged)
+                WebViewHost(
+                    webView, url, pageState, fullscreen, mediaController, keyRouter,
+                    onWebViewChanged, onChangeSite,
+                )
             }
         }
     }
@@ -94,11 +135,18 @@ private fun BoxScope.WebViewHost(
     webView: WebView,
     url: String,
     pageState: PageState,
+    fullscreen: FullscreenVideoState,
+    mediaController: MediaController,
     keyRouter: KeyRouter,
     onWebViewChanged: (WebView?) -> Unit,
+    onChangeSite: () -> Unit,
 ) {
     val lifecycleOwner = LocalLifecycleOwner.current
-    // Remembered here (per WebView), not inside PointerLayer: the pointer keeps its position
+    val hostView = LocalView.current
+    val osd = remember(webView) { OsdState() }
+    val activeVideo by mediaController.activeVideo.collectAsStateWithLifecycle()
+    val fullscreenSession = fullscreen.current
+    // Remembered here (per WebView), not inside RemoteInputLayer: the pointer keeps its position
     // across page loads and across an error panel coming and going.
     val pointerState = remember(webView) { PointerState() }
     val currentOnWebViewChanged by rememberUpdatedState(onWebViewChanged)
@@ -128,6 +176,9 @@ private fun BoxScope.WebViewHost(
         onDispose {
             lifecycleOwner.lifecycle.removeObserver(observer)
             currentOnWebViewChanged(null)
+            // Never destroy a WebView that is still in full screen: end it first (detaches the
+            // custom view and tells WebView).
+            fullscreen.exitByUser()
             // Detach first: destroy() on a WebView still attached to a window logs errors
             // and can leak. Then release its renderer and memory.
             (webView.parent as? ViewGroup)?.removeView(webView)
@@ -163,11 +214,30 @@ private fun BoxScope.WebViewHost(
         modifier = Modifier.align(Alignment.TopStart),
     )
 
-    // Pointer mode only while the page itself is visible. With the error panel up, the layer
+    // Full-screen video: above the WebView, below the OSD and pointer.
+    if (fullscreenSession != null) {
+        key(fullscreenSession) { FullscreenVideoHost(fullscreenSession) }
+    }
+    FullscreenWindowEffects(hostView, webView, isFullscreen = fullscreenSession != null)
+
+    // Keep the screen on only while the active video plays. Without a known video (agent
+    // unsupported, or a frame it can't see) keep it on while full screen is showing instead.
+    val keepScreenOn = activeVideo?.playing == true || (fullscreenSession != null && activeVideo == null)
+    DisposableEffect(hostView, keepScreenOn) {
+        hostView.keepScreenOn = keepScreenOn
+        onDispose { hostView.keepScreenOn = false }
+    }
+
+    VideoOsd(state = osd, video = activeVideo, modifier = Modifier.fillMaxSize())
+
+    // Remote input only while the page itself is visible. With the error panel up, the layer
     // leaves composition, its key handler unregisters, and Retry gets normal D-pad focus.
     if (error == null) {
-        PointerLayer(
-            target = webView,
+        RemoteInputLayer(
+            webView = webView,
+            fullscreen = fullscreen,
+            mediaController = mediaController,
+            osd = osd,
             state = pointerState,
             keyRouter = keyRouter,
             modifier = Modifier.fillMaxSize(),
@@ -180,8 +250,58 @@ private fun BoxScope.WebViewHost(
                 pageState.mainFrameError = null
                 webView.loadUrl(error.failedUrl)
             },
+            onChangeSite = onChangeSite,
         )
     }
+}
+
+/**
+ * Shows the view WebView handed us in onShowCustomView, filling the screen. Keyed by session in
+ * the caller, so a new session gets a fresh AndroidView. The view's lifetime belongs to
+ * FullscreenVideoState (it detaches the view when full screen ends), not to AndroidView.
+ */
+@Composable
+private fun FullscreenVideoHost(session: FullscreenSession) {
+    AndroidView(
+        factory = {
+            session.view.apply {
+                // A View can have only one parent; be defensive in case WebView left it attached.
+                (parent as? ViewGroup)?.removeView(this)
+                setBackgroundColor(android.graphics.Color.BLACK)
+                isFocusable = true
+                // Focus moves here so fallback key events and typing go to the video.
+                post { requestFocus() }
+            }
+        },
+        modifier = Modifier.fillMaxSize(),
+    )
+}
+
+/** Window-level side effects of full screen: system bars and giving focus back afterwards. */
+@Composable
+private fun FullscreenWindowEffects(hostView: View, webView: WebView, isFullscreen: Boolean) {
+    LaunchedEffect(isFullscreen) {
+        if (isFullscreen) {
+            // Bars are already hidden app-wide (MainActivity); re-assert in case a dialog or
+            // the IME brought them back, so the video gets every pixel.
+            hostView.context.findWindow()?.let { window ->
+                WindowCompat.getInsetsController(window, hostView).apply {
+                    systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+                    hide(WindowInsetsCompat.Type.systemBars())
+                }
+            }
+        } else if (!webView.hasFocus()) {
+            // The full-screen view had focus and is gone; give it back to the page.
+            webView.requestFocus()
+        }
+    }
+}
+
+/** Compose hands us the Activity's context, possibly wrapped (e.g. for theming). */
+private tailrec fun Context.findWindow(): Window? = when (this) {
+    is Activity -> window
+    is ContextWrapper -> baseContext.findWindow()
+    else -> null
 }
 
 /** Thin bar across the top while a page loads. */
@@ -197,9 +317,12 @@ private fun LoadingBar(progress: Int, visible: Boolean, modifier: Modifier = Mod
     )
 }
 
-/** Centered title, message and a focused Retry button. Used for load errors and missing WebView. */
+/**
+ * Centered title, message, a focused Retry button and a Change site button next to it.
+ * Used for load errors, renderer crashes and a missing WebView.
+ */
 @Composable
-private fun MessagePanel(title: String, message: String, onRetry: () -> Unit) {
+private fun MessagePanel(title: String, message: String, onRetry: () -> Unit, onChangeSite: () -> Unit) {
     val retryFocus = remember { FocusRequester() }
     LaunchedEffect(Unit) { retryFocus.requestFocus() }
 
@@ -226,8 +349,14 @@ private fun MessagePanel(title: String, message: String, onRetry: () -> Unit) {
                 textAlign = TextAlign.Center,
             )
             Spacer(Modifier.height(24.dp))
-            Button(onClick = onRetry, modifier = Modifier.focusRequester(retryFocus)) {
-                Text(stringResource(R.string.browser_retry))
+            // A Row, so Left/Right moves between the buttons with the D-pad.
+            Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+                Button(onClick = onRetry, modifier = Modifier.focusRequester(retryFocus)) {
+                    Text(stringResource(R.string.browser_retry))
+                }
+                Button(onClick = onChangeSite) {
+                    Text(stringResource(R.string.browser_change_site))
+                }
             }
         }
     }
@@ -244,6 +373,7 @@ private class PageState : PageListener {
     var progress by mutableIntStateOf(0)
     var isLoading by mutableStateOf(false)
     var mainFrameError by mutableStateOf<MainFrameError?>(null)
+    var rendererGone by mutableStateOf(false)
 
     override fun onPageStarted(url: String) {
         isLoading = true
@@ -261,5 +391,11 @@ private class PageState : PageListener {
 
     override fun onMainFrameError(failedUrl: String, description: String) {
         mainFrameError = MainFrameError(failedUrl, description)
+    }
+
+    override fun onRenderProcessGone() {
+        isLoading = false
+        mainFrameError = null
+        rendererGone = true
     }
 }

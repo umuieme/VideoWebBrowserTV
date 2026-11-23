@@ -15,7 +15,18 @@
     <!-- Browser -->
     <string name="browser_load_error_title">Couldn\'t load this page</string>
     <string name="browser_retry">Retry</string>
+    <string name="browser_change_site">Change site</string>
     <string name="webview_unavailable_title">Web browser component unavailable</string>
     <string name="webview_unavailable_message">Android System WebView is missing, disabled or being updated. Wait a minute and try again, or check it under Settings › Apps.</string>
     <string name="back_again_to_exit">Press Back again to exit</string>
+    <string name="renderer_gone_title">This page stopped working</string>
+    <string name="renderer_gone_message">The web page crashed or ran out of memory. Press Retry to load it again.</string>
+
+    <!-- Video on-screen display -->
+    <string name="osd_playing">▶ Playing</string>
+    <string name="osd_paused">❚❚ Paused</string>
+    <string name="osd_play_pause">▶❚❚</string>
+    <string name="osd_seek_forward">+%1$d s</string>
+    <string name="osd_seek_back">−%1$d s</string>
+    <string name="osd_time">%1$s / %2$s</string>
 </resources>

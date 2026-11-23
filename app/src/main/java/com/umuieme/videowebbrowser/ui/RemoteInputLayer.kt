@@ -1,13 +1,15 @@
-package com.umuieme.videowebbrowser.ui.pointer
+package com.umuieme.videowebbrowser.ui
 
 import android.os.SystemClock
 import android.util.Log
 import android.view.KeyEvent
 import android.view.View
+import androidx.activity.compose.LocalOnBackPressedDispatcherOwner
 import androidx.compose.animation.core.tween
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -20,6 +22,12 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
+import com.umuieme.videowebbrowser.browser.FullscreenBackCallback
+import com.umuieme.videowebbrowser.browser.FullscreenVideoState
+import com.umuieme.videowebbrowser.browser.media.MediaController
+import com.umuieme.videowebbrowser.browser.media.MediaRoute
+import com.umuieme.videowebbrowser.browser.media.MediaRouter
+import com.umuieme.videowebbrowser.browser.media.NativeMediaKeyFallback
 import com.umuieme.videowebbrowser.input.Edge
 import com.umuieme.videowebbrowser.input.InputCommand
 import com.umuieme.videowebbrowser.input.InputInjector
@@ -27,35 +35,48 @@ import com.umuieme.videowebbrowser.input.InputTuning
 import com.umuieme.videowebbrowser.input.KeyHandler
 import com.umuieme.videowebbrowser.input.KeyMap
 import com.umuieme.videowebbrowser.input.KeyRouter
+import com.umuieme.videowebbrowser.input.MediaAction
 import com.umuieme.videowebbrowser.input.PointerMotion
 import com.umuieme.videowebbrowser.input.PointerPhysics
 import com.umuieme.videowebbrowser.input.RemoteInputController
+import com.umuieme.videowebbrowser.input.isFullscreen
+import com.umuieme.videowebbrowser.ui.pointer.PointerOverlay
+import com.umuieme.videowebbrowser.ui.pointer.PointerState
+import com.umuieme.videowebbrowser.ui.video.OsdState
+import com.umuieme.videowebbrowser.ui.video.osdEventFor
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlin.time.Duration.Companion.milliseconds
 
-private const val TAG = "PointerLayer"
+private const val TAG = "RemoteInputLayer"
 
 /**
- * Pointer mode for [target]: takes remote keys from [keyRouter] while composed, moves
- * [state]'s pointer, injects clicks/hover into [target] and draws the overlay.
+ * Remote control for the browser screen while the page is shown: takes keys from [keyRouter],
+ * runs the input state machine, moves and draws the pointer, injects clicks/hover, sends media
+ * commands, and handles Back while a video is full screen.
  *
- * Compose it only while pointer input should be active (BrowserScreen does so only while the
- * page is shown without an error panel). Leaving composition unregisters the key handler, so
- * every other screen keeps normal focus navigation.
+ * The injection target is the full-screen video view while one is showing, otherwise
+ * [webView]. Leaving composition unregisters the key handler and the Back callback, so other
+ * screens keep normal focus navigation.
  */
 @Composable
-fun PointerLayer(
-    target: View,
+fun RemoteInputLayer(
+    webView: View,
+    fullscreen: FullscreenVideoState,
+    mediaController: MediaController,
+    osd: OsdState,
     state: PointerState,
     keyRouter: KeyRouter,
     modifier: Modifier = Modifier,
 ) {
     val scope = rememberCoroutineScope()
-    val session = remember(state) { PointerSession(state, RemoteInputController(), InputInjector(), scope) }
-    session.injector.target = target
+    val session = remember(state, mediaController) {
+        InputSession(state, RemoteInputController(), InputInjector(), mediaController, osd, fullscreen, scope)
+    }
+    val fullscreenView = fullscreen.current?.view
+    session.injector.target = fullscreenView ?: webView
     // Density only changes with display settings; refresh it on recomposition.
     session.density = LocalDensity.current.density
 
@@ -68,6 +89,21 @@ fun PointerLayer(
             session.injector.release()
         }
     }
+
+    // Input mode follows full screen: entering switches to video control, leaving (by any
+    // path: Back, the player's button, page navigation) returns to the pointer.
+    val isFullscreen = fullscreenView != null
+    LaunchedEffect(isFullscreen, session) { session.onFullscreenChanged(isFullscreen) }
+
+    // Second Back callback, enabled only while full screen (see FullscreenBackCallback for how
+    // the dispatcher chooses). Added from here so its lifetime matches this screen.
+    val dispatcher = LocalOnBackPressedDispatcherOwner.current?.onBackPressedDispatcher
+    val backCallback = remember(session) { FullscreenBackCallback(session::onFullscreenBack) }
+    DisposableEffect(dispatcher, backCallback) {
+        dispatcher?.addCallback(backCallback)
+        onDispose { backCallback.remove() }
+    }
+    SideEffect { backCallback.isEnabled = isFullscreen }
 
     // A key held while the app goes to the background never sends its UP to us.
     // Forget held keys on pause so the pointer can't keep drifting when we come back.
@@ -95,9 +131,10 @@ fun PointerLayer(
         }
     }
 
-    // OK long-press timer. The controller is pure and has no timers, so we wake it at its deadline.
-    LaunchedEffect(session.longPressDeadline, session) {
-        val deadline = session.longPressDeadline ?: return@LaunchedEffect
+    // Timer for the controller's deadlines (OK long press, held-seek steps). The controller is
+    // pure and has no timers, so we wake it at its deadline; it then reports the next one.
+    LaunchedEffect(session.deadline, session) {
+        val deadline = session.deadline ?: return@LaunchedEffect
         delay((deadline - SystemClock.uptimeMillis()).coerceAtLeast(0L).milliseconds)
         session.tick()
     }
@@ -125,42 +162,79 @@ fun PointerLayer(
  * Hook for "pointer held against a screen edge". Called every frame while an arrow pushes the
  * pointer into [edges]; [dtSec] is the frame time so a future implementation can scroll at a
  * time-based speed. Intentionally a no-op: edge scrolling is planned with scroll mode
- * (Milestone 4).
+ * (Milestone 5).
  */
 @Suppress("UNUSED_PARAMETER")
 private fun onPointerPushedAgainstEdge(edges: Set<Edge>, dtSec: Float) = Unit
 
 /**
- * Glue between key events, the pure controller/physics and the Android-facing injector.
- * Remembered once per [PointerState]; all methods run on the main thread.
+ * Glue between key events, the pure controller/physics and the Android-facing injector and
+ * media router. Remembered once per [PointerState]; all methods run on the main thread.
  */
-private class PointerSession(
+private class InputSession(
     private val state: PointerState,
     private val controller: RemoteInputController,
     val injector: InputInjector,
+    private val media: MediaController,
+    private val osd: OsdState,
+    private val fullscreen: FullscreenVideoState,
     private val scope: CoroutineScope,
 ) : KeyHandler {
 
     var density = 1f
 
+    private val router = MediaRouter(media, NativeMediaKeyFallback { injector.target })
+
+    /**
+     * Media keys whose DOWN we let through to the WebView (no video known while browsing).
+     * Their repeats and UP must go the same way, or the page sees a DOWN without an UP.
+     */
+    private val passedThrough = HashSet<Int>()
+
     /** Mirrors controller.nextDeadlineMs as Compose state so the timer effect restarts on change. */
-    var longPressDeadline by mutableStateOf<Long?>(null)
+    var deadline by mutableStateOf<Long?>(null)
         private set
 
     override fun onKeyEvent(event: KeyEvent): Boolean {
         val key = KeyMap.fromKeyCode(event.keyCode) ?: return false
+        if (event.keyCode in passedThrough) {
+            if (event.action == KeyEvent.ACTION_UP) passedThrough.remove(event.keyCode)
+            return false
+        }
         val result = when (event.action) {
             KeyEvent.ACTION_DOWN -> controller.onKeyDown(key, event.eventTime, isRepeat = event.repeatCount > 0)
             KeyEvent.ACTION_UP -> controller.onKeyUp(key, event.eventTime)
             else -> return false
         }
-        apply(result.commands)
+        val passThrough = apply(result.commands)
+        if (passThrough) {
+            passedThrough += event.keyCode
+            return false
+        }
         return result.consumed
     }
 
-    fun tick() = apply(controller.onTick(SystemClock.uptimeMillis()))
+    fun tick() {
+        apply(controller.onTick(SystemClock.uptimeMillis()))
+    }
 
-    fun resetInput() = apply(controller.reset())
+    fun resetInput() {
+        apply(controller.reset())
+        passedThrough.clear()
+    }
+
+    fun onFullscreenChanged(showing: Boolean) {
+        apply(if (showing) controller.enterFullscreen() else controller.exitFullscreen())
+    }
+
+    /** Back while full screen: pointer → video control, or video control → exit full screen. */
+    fun onFullscreenBack() {
+        val result = controller.onFullscreenBack()
+        apply(result.commands)
+        // Exiting triggers onFullscreenChanged(false) on the next composition, which puts the
+        // controller back into pointer mode.
+        if (!result.consumed) fullscreen.exitByUser()
+    }
 
     fun onFrame(dtSec: Float) {
         val bounds = state.bounds ?: return
@@ -172,16 +246,30 @@ private class PointerSession(
         if (step.edgesPushed.isNotEmpty()) onPointerPushedAgainstEdge(step.edgesPushed, dtSec)
     }
 
-    private fun apply(commands: List<InputCommand>) {
+    /** Runs [commands]; returns true if a media command should pass through to the WebView. */
+    private fun apply(commands: List<InputCommand>): Boolean {
+        var passThrough = false
         for (command in commands) {
             when (command) {
                 is InputCommand.DirectionsChanged -> onDirectionsChanged(command)
                 InputCommand.Click -> onClick()
-                // Milestone 4 turns this into "enter scroll mode".
-                InputCommand.LongPressOk -> Log.d(TAG, "Long-press OK (scroll mode comes in Milestone 4)")
+                // Milestone 5 turns this into "enter scroll mode".
+                InputCommand.LongPressOk -> Log.d(TAG, "Long-press OK (scroll mode comes in Milestone 5)")
+                is InputCommand.Media -> if (!onMedia(command.action)) passThrough = true
+                is InputCommand.PointerVisibility -> if (command.visible) showPointerOverVideo() else hidePointer()
             }
         }
-        longPressDeadline = controller.nextDeadlineMs
+        deadline = controller.nextDeadlineMs
+        return passThrough
+    }
+
+    /** Returns false when nothing handled the action (the key should pass through). */
+    private fun onMedia(action: MediaAction): Boolean {
+        val playingBefore = media.activeVideo.value?.playing
+        val route = router.perform(action, fullscreen = controller.mode.isFullscreen)
+        if (route == MediaRoute.PassThrough) return false
+        osd.show(osdEventFor(action, if (route == MediaRoute.Agent) playingBefore else null))
+        return true
     }
 
     private fun onDirectionsChanged(command: InputCommand.DirectionsChanged) {
@@ -224,6 +312,18 @@ private class PointerSession(
         state.visible = true
         state.markActivity()
         scope.launch { state.alpha.snapTo(1f) }
+    }
+
+    /** Up/Down in full-screen video: show the pointer and hover so the player shows its controls. */
+    private fun showPointerOverVideo() {
+        reveal()
+        hoverAtPointer(force = true)
+    }
+
+    /** Hides the pointer instantly (video control in full screen). */
+    private fun hidePointer() {
+        state.visible = false
+        scope.launch { state.alpha.snapTo(0f) }
     }
 
     private fun hoverAtPointer(force: Boolean) {

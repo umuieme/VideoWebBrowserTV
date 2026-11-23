@@ -19,11 +19,11 @@ object KeyMap {
         KeyEvent.KEYCODE_ENTER,
         KeyEvent.KEYCODE_NUMPAD_ENTER,
         -> RemoteKey.Ok
-        // Some remotes have separate Play and Pause keys; for us they all toggle.
-        KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE,
-        KeyEvent.KEYCODE_MEDIA_PLAY,
-        KeyEvent.KEYCODE_MEDIA_PAUSE,
-        -> RemoteKey.PlayPause
+        KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE -> RemoteKey.PlayPause
+        // Separate Play and Pause keys (some remotes, keyboards, Bluetooth headsets) keep their
+        // meaning: "Pause" must never start a paused video.
+        KeyEvent.KEYCODE_MEDIA_PLAY -> RemoteKey.Play
+        KeyEvent.KEYCODE_MEDIA_PAUSE -> RemoteKey.Pause
         KeyEvent.KEYCODE_MEDIA_FAST_FORWARD -> RemoteKey.FastForward
         KeyEvent.KEYCODE_MEDIA_REWIND -> RemoteKey.Rewind
         else -> null

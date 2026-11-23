@@ -26,9 +26,18 @@ class BrowserViewModel(private val settings: SettingsRepository) : ViewModel() {
     // Validation error from the last setup submission; it lives here so it isn't lost on recreation.
     private val setupError = MutableStateFlow<UrlError?>(null)
 
+    // True while the user is changing the saved site ("Change site" on an error panel).
+    // Kept here, not in Compose, so a configuration change doesn't drop them back into the
+    // broken site mid-edit.
+    private val changingSite = MutableStateFlow(false)
+
     val uiState: StateFlow<BrowserUiState> =
-        combine(settings.homeUrl, setupError) { homeUrl, error ->
-            if (homeUrl == null) BrowserUiState.NeedsSetup(error) else BrowserUiState.Browsing(homeUrl)
+        combine(settings.homeUrl, setupError, changingSite) { homeUrl, error, changing ->
+            when {
+                homeUrl == null -> BrowserUiState.NeedsSetup(error)
+                changing -> BrowserUiState.NeedsSetup(error, currentUrl = homeUrl)
+                else -> BrowserUiState.Browsing(homeUrl)
+            }
         }.stateIn(
             scope = viewModelScope,
             // Stop reading DataStore 5 s after the UI stops collecting (app in background);
@@ -45,7 +54,12 @@ class BrowserViewModel(private val settings: SettingsRepository) : ViewModel() {
         when (val result = UrlNormalizer.normalize(input)) {
             is UrlResult.Valid -> {
                 setupError.value = null
-                viewModelScope.launch { settings.saveHomeUrl(result.url) }
+                viewModelScope.launch {
+                    settings.saveHomeUrl(result.url)
+                    // After the save, so the browser never flashes the old URL. Also covers
+                    // re-submitting the same URL, where DataStore emits nothing new.
+                    changingSite.value = false
+                }
             }
             is UrlResult.Invalid -> setupError.value = result.error
         }
@@ -54,6 +68,18 @@ class BrowserViewModel(private val settings: SettingsRepository) : ViewModel() {
     /** Called when the user edits the URL, so a stale error doesn't stay on screen. */
     fun clearSetupError() {
         setupError.value = null
+    }
+
+    /** Opens the setup screen prefilled with the saved URL, e.g. when that site won't load. */
+    fun changeSite() {
+        setupError.value = null
+        changingSite.value = true
+    }
+
+    /** Back from "Change site": return to the browser with the saved URL unchanged. */
+    fun cancelChangeSite() {
+        setupError.value = null
+        changingSite.value = false
     }
 
     companion object {

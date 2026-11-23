@@ -61,6 +61,11 @@ covers what only a real TV and remote can verify.
 | 2.18 | Turn off Wi-Fi, force-stop and relaunch the app. | "Couldn't load this page" with a `net::ERR_…` detail; "Retry" is focused. |
 | 2.19 | Turn Wi-Fi back on and press Retry. | The page loads normally. |
 | 2.20 | `pm clear`, set up `https://nothing.invalid`. | The error panel appears (`net::ERR_NAME_NOT_RESOLVED`). |
+| 2.20a | On that error panel, press Right. | Focus moves from Retry to "Change site". |
+| 2.20b | Press OK on "Change site". | The setup screen opens with `https://nothing.invalid` already in the field. |
+| 2.20c | Press Back on that setup screen (keyboard closed, not editing). | Returns to the browser, which tries the saved URL again (error panel again). |
+| 2.20d | Open "Change site" again, enter a working URL and press Open. Then force-stop and relaunch. | The new site loads, and it is still the one opened after the relaunch. |
+| 2.20e | Open "Change site", press OK on the field, press Back once, then Back again. | The first Back closes the keyboard / stops editing; the second returns to the browser. |
 | 2.21 | (Optional, emulator only) Disable "Android System WebView" and launch. | "Web browser component unavailable" with Retry; no crash. |
 
 ### Back (temporary, replaced in Milestone 5)
@@ -83,7 +88,7 @@ covers what only a real TV and remote can verify.
 Notes:
 - Use the physical remote. Key events from `adb shell input keyevent` carry the virtual-keyboard
   device id, which the app deliberately passes through, so they don't move the pointer.
-- Long-press OK logs only: `adb logcat -s PointerLayer`.
+- Long-press OK logs only: `adb logcat -s RemoteInputLayer`.
 - Good test pages: a site with a CSS hover menu (most news/shop sites), a video page whose player
   hides its controls until hovered, and a page with a search box.
 
@@ -96,7 +101,7 @@ Notes:
 | 3.3 | Hold Right for about 2 seconds. | After a short pause the pointer starts slowly, speeds up smoothly over about a second, then glides fast. No stutter. |
 | 3.4 | Hold Left, Up and Down in turn. | Same behaviour in every direction. |
 | 3.5 | Hold Up, then press and hold Right as well. | The pointer moves diagonally up-right at the same speed as a straight move. **Remote limitation:** many TV remotes report only one key at a time; if the pointer just switches to moving right, that is the remote, not the app. |
-| 3.6 | Hold an arrow until the pointer reaches the screen edge; keep holding. | The pointer stops with its tip at the edge and never leaves the screen. Nothing else happens yet (edge scrolling is planned for Milestone 4). |
+| 3.6 | Hold an arrow until the pointer reaches the screen edge; keep holding. | The pointer stops with its tip at the edge and never leaves the screen. Nothing else happens yet (edge scrolling is planned for Milestone 5). |
 | 3.7 | Hold an arrow, then release it. | The pointer stops immediately; it does not drift. |
 | 3.8 | Hold an arrow and press Home while holding; release; reopen the app. | The pointer is not moving on return. |
 
@@ -108,7 +113,7 @@ Notes:
 | 3.10 | Move the pointer over a menu that opens on mouse hover. | The menu opens while the pointer is over it, without pressing OK. |
 | 3.11 | On a video page, move the pointer over the paused player. | The player's controls appear. |
 | 3.12 | Click the player's play button (or the video itself). | The video starts playing, with sound. |
-| 3.13 | Click the site's fullscreen button on the player, if it has one. | The site's fullscreen request is accepted (full-screen video handling itself is Milestone 5). Back still works. |
+| 3.13 | Click the site's fullscreen button on the player, if it has one. | The video goes full screen (details in Milestone 4). |
 | 3.14 | Click a text field (e.g. the search box). | The on-screen keyboard opens. |
 | 3.15 | Type a word with the keyboard and submit (Go/Search key). | The text appears in the field and the search runs. |
 | 3.16 | With the keyboard open, use the arrows. | The arrows move within the keyboard, not the pointer. |
@@ -134,3 +139,93 @@ Notes:
 | 3.26 | Trigger a load error (as in 2.18). | Error panel with no pointer; Retry is focused and OK presses it. |
 | 3.27 | After Retry succeeds. | The pointer is back, at the position it had before the error. |
 | 3.28 | On any page, press Back. | Back behaves exactly as in 2.22–2.25 (pointer mode doesn't touch Back). |
+
+## Milestone 4: Video playback
+
+Notes:
+- Use the physical remote (see Milestone 3 notes about `adb shell input`).
+- Debug log of which path handled a media command: `adb logcat -s VWB-Media`. Lines look like
+  `TogglePlay -> Agent (fullscreen=true)`; `NativeKeys` = key fallback, `PassThrough` = key left to the page.
+  The first line after launch says whether the agent was installed or is unsupported by this WebView.
+- Test pages:
+  - **Plain HTML5 video (same origin):** `https://www.w3schools.com/html/html5_video.asp`
+  - **Cross-origin iframe player:** `https://www.w3schools.com/html/html_youtube.asp` (embedded YouTube), or any news article with an embedded YouTube/Vimeo player.
+  - **DRM (Widevine):** `https://shaka-player-demo.appspot.com`, pick a Widevine asset (e.g. "Angel One (multicodec, multilingual, Widevine)").
+  - **Your own site** (the one set at first run): repeat the full-screen and key tests there.
+
+### Enter and exit full screen
+
+| # | Steps | Expected result |
+|---|-------|-----------------|
+| 4.1 | On a video page, start the video and click the player's full-screen button with the pointer. | The video fills the screen, no system bars. The pointer disappears. The video does **not** pause when you release OK. |
+| 4.2 | In full screen, press Back. | Full screen closes; the page is shown as before, the pointer works, the page did not navigate back. |
+| 4.3 | Enter full screen again, move the pointer over the video (Up), click the player's exit-full-screen button. | Full screen closes. Arrows move the pointer normally afterwards. |
+| 4.4 | Enter and exit full screen five times quickly (button, Back, button, Back...). | No black screen, no frozen video, no crash. After the last exit the page responds normally. |
+| 4.5 | On the page (not full screen), press Back. | Normal browsing Back (history / "Press Back again to exit"), as in 2.22–2.25. |
+
+### Video control in full screen
+
+| # | Steps | Expected result |
+|---|-------|-----------------|
+| 4.6 | In full screen, press OK. | The video pauses; the OSD at the bottom shows "❚❚ Paused" and current / total time. Press OK again: plays, OSD shows "▶ Playing". |
+| 4.7 | Press Right once. | Jumps forward about 10 s; OSD shows "+10 s" and the new time. |
+| 4.8 | Press Left once. | Jumps back about 10 s; OSD shows "−10 s". |
+| 4.9 | Hold Right for about 4 seconds, then release. | Steps of 10 s every ~0.4 s, then after ~2 s steps of 30 s. The OSD total keeps growing ("+40 s", "+70 s"...). Seeking stops immediately on release. |
+| 4.10 | Leave the remote alone after an action. | The OSD disappears after about 2 s. It never steals focus (OK still toggles play right after it shows). |
+
+### Pointer over the full-screen video
+
+| # | Steps | Expected result |
+|---|-------|-----------------|
+| 4.11 | In full screen, press Up (or Down). | The pointer appears where it was; the player shows its controls. |
+| 4.12 | Move the pointer to the player's settings/CC button and click; change subtitles or quality. | The menus open and the change applies. Arrows move the pointer (they do not seek) while it is shown. |
+| 4.13 | Press Back once. | The pointer hides; you're back in video control (OK = play/pause, Left/Right = seek). Full screen stays. |
+| 4.14 | Press Back again. | Full screen closes. |
+
+### Media keys
+
+If your remote has no separate media keys, a Bluetooth keyboard or the Google TV phone remote app with a play/pause button works too.
+
+| # | Steps | Expected result |
+|---|-------|-----------------|
+| 4.15 | On a page with a playing inline (not full-screen) video, press Play/Pause. | The video pauses, OSD shows "❚❚ Paused" and the time. Press again: plays. |
+| 4.16 | In full screen, press Play/Pause, then (if available) Fast-forward and Rewind. | Play/pause toggles; FF/Rewind seek ±10 s with OSD. |
+| 4.17 | (If available) With the video playing press Play: nothing changes. Press Pause twice. | Play never pauses; Pause never resumes a paused video. |
+
+### Cross-origin iframe
+
+| # | Steps | Expected result |
+|---|-------|-----------------|
+| 4.18 | Open the iframe test page; start the embedded video by clicking it. | It plays. |
+| 4.19 | Press Play/Pause (inline). | The embedded video pauses and resumes; OSD shows time / duration. Logcat shows `-> Agent`. |
+| 4.20 | Click the embedded player's full-screen button; test OK, Left/Right, Up + Back, Back. | Same behaviour as 4.6–4.14. |
+
+### Page without video (fallback)
+
+| # | Steps | Expected result |
+|---|-------|-----------------|
+| 4.21 | On a page with no video (e.g. `https://example.com`), press Play/Pause. | Nothing happens: no scrolling, no OSD, no crash. Logcat shows `-> PassThrough`. |
+| 4.22 | On a page with a long article and no video, press Play/Pause several times. | The page does **not** scroll. |
+
+### Screen stays on only while playing
+
+Set the TV's screensaver to its shortest delay first (Settings › System › Ambient mode / Screensaver › Start after). To check without waiting: `adb shell dumpsys window windows | grep -E "mCurrentFocus|KEEP_SCREEN_ON"`.
+
+| # | Steps | Expected result |
+|---|-------|-----------------|
+| 4.23 | Play a video (inline or full screen) longer than the screensaver delay; don't touch the remote. | The screensaver never starts. `dumpsys` shows `KEEP_SCREEN_ON` for the app's window. |
+| 4.24 | Pause the video and wait past the delay. | The screensaver starts normally. `KEEP_SCREEN_ON` is gone while paused. |
+| 4.25 | Let a video play to its end and wait. | The screensaver starts after the delay. |
+
+### DRM
+
+| # | Steps | Expected result |
+|---|-------|-----------------|
+| 4.26 | On the Shaka demo, play a Widevine asset. | It plays (no "permission" or EME error). Expect limited resolution: WebView normally gets software Widevine (L3), so commercial services usually cap at SD–720p and may refuse some titles. |
+| 4.27 | Open a page that asks for the camera or microphone (e.g. `https://webcamtests.com`). | Access is denied silently; the app does not crash or show a prompt. |
+
+### Renderer crash (optional, emulator only)
+
+| # | Steps | Expected result |
+|---|-------|-----------------|
+| 4.28 | With a page open on an emulator: `adb root`, then `adb shell pkill -f sandboxed_process`. | "This page stopped working" with Retry focused; the app does not crash. Retry loads the page in a new WebView. |

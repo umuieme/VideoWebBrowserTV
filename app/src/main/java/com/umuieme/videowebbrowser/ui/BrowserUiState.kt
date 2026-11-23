@@ -7,8 +7,19 @@ sealed interface BrowserUiState {
     /** Settings are still being read from disk (a few milliseconds at startup). */
     data object Loading : BrowserUiState
 
-    /** No home URL saved yet. [error] is set after an invalid submission. */
-    data class NeedsSetup(val error: UrlError? = null) : BrowserUiState
+    /**
+     * Ask for the site URL: on first run, or when the user chose "Change site".
+     *
+     * @param error set after an invalid submission.
+     * @param currentUrl the saved URL when changing site (prefills the field), null on first run.
+     *   Non-null also means Back can return to the browser.
+     */
+    data class NeedsSetup(
+        val error: UrlError? = null,
+        val currentUrl: String? = null,
+    ) : BrowserUiState {
+        val canCancel: Boolean get() = currentUrl != null
+    }
 
     /** A home URL is saved; show it in the WebView. */
     data class Browsing(val url: String) : BrowserUiState

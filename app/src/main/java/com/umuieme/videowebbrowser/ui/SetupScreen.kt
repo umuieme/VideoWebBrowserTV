@@ -60,11 +60,15 @@ import com.umuieme.videowebbrowser.ui.theme.VideoWebBrowserTheme
 import kotlinx.coroutines.flow.drop
 
 /**
- * First-run screen: asks for the site URL. Fully usable with arrows, OK and Back.
+ * Asks for the site URL: on first run, and from "Change site". Fully usable with arrows, OK
+ * and Back.
  *
  * @param error validation error from the last submission, or null.
  * @param onSubmit called with the raw text; the ViewModel validates and saves it.
  * @param onInputChanged called when the text changes, so a stale error can be cleared.
+ * @param initialUrl prefills the field (the saved URL when changing site).
+ * @param onCancel when non-null, Back calls it (return to the browser). On first run it's null
+ *   and Back falls through to the Activity's exit handling.
  */
 @Composable
 fun SetupScreen(
@@ -72,9 +76,15 @@ fun SetupScreen(
     onSubmit: (String) -> Unit,
     onInputChanged: () -> Unit,
     modifier: Modifier = Modifier,
+    initialUrl: String? = null,
+    onCancel: (() -> Unit)? = null,
 ) {
-    val urlState = rememberTextFieldState()
+    val urlState = rememberTextFieldState(initialText = initialUrl.orEmpty())
     val fieldFocus = remember { FocusRequester() }
+
+    // Composed before TvUrlField, so its own BackHandler (leave the field while editing) is
+    // registered later and wins: Back first stops editing, the next Back cancels.
+    BackHandler(enabled = onCancel != null) { onCancel?.invoke() }
 
     // Nothing is focused when a screen appears. Focus the URL field so OK works immediately.
     LaunchedEffect(Unit) { fieldFocus.requestFocus() }

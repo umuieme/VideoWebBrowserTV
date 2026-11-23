@@ -25,8 +25,8 @@ class KeyMapTest {
     @Test
     fun `media keys map to media remote keys`() {
         assertEquals(RemoteKey.PlayPause, KeyMap.fromKeyCode(KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE))
-        assertEquals(RemoteKey.PlayPause, KeyMap.fromKeyCode(KeyEvent.KEYCODE_MEDIA_PLAY))
-        assertEquals(RemoteKey.PlayPause, KeyMap.fromKeyCode(KeyEvent.KEYCODE_MEDIA_PAUSE))
+        assertEquals(RemoteKey.Play, KeyMap.fromKeyCode(KeyEvent.KEYCODE_MEDIA_PLAY))
+        assertEquals(RemoteKey.Pause, KeyMap.fromKeyCode(KeyEvent.KEYCODE_MEDIA_PAUSE))
         assertEquals(RemoteKey.FastForward, KeyMap.fromKeyCode(KeyEvent.KEYCODE_MEDIA_FAST_FORWARD))
         assertEquals(RemoteKey.Rewind, KeyMap.fromKeyCode(KeyEvent.KEYCODE_MEDIA_REWIND))
     }

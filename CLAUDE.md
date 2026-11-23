@@ -27,16 +27,17 @@ public portfolio repo, so code quality, README and CI matter.
 
 
 ## Planned packages
-ui/ (Compose screens, pointer overlay, menu), browser/ (WebView setup, navigation policy,
-fullscreen video), input/ (input mode state machine, pointer physics, input injector),
+ui/ (Compose screens, pointer overlay, OSD, menu), browser/ (WebView setup, navigation policy,
+fullscreen video; browser/media/ for the media agent bridge), input/ (input mode state machine, pointer physics, input injector),
 data/ (SettingsRepository), assets/js/.
 
 ## Milestones
 1. Skeleton: TV manifest, Gradle config, banner, GitHub repo, CI building the debug APK
 2. Full-screen WebView + first-run URL screen + DataStore settings
 3. Pointer mode
-4. Scroll mode (JS scroll + swipe fallback)
-5. Back handling, full-screen video, media keys
+4. Video playback: full-screen video, media agent (all frames), remote and media keys, OSD,
+   keep screen on, DRM permission, Back in full screen
+5. Scroll mode (JS scroll + swipe fallback), Back handling (close site popups)
 6. Navigation policy (popup/redirect blocking, allowlist), settings screen, menu
 7. Polish: zoom, desktop UA, D-pad mode, icon and banner
 8. Tests, signed release workflow (GitHub Releases), README with GIF, tag v1.0
@@ -57,5 +58,5 @@ data/ (SettingsRepository), assets/js/.
 - Never run any git commands (add, commit, push, branch) and never create GitHub repos.
   I handle version control myself.
 - Never change signing or secrets without asking first.
-- At the end of each step, suggest a conventional commit message (feat:, chore:, fix:)
-  that I can use.
+- Don't suggest commit messages unprompted. When I ask, suggest conventional commit
+  messages (feat:, chore:, fix:) that I can use.

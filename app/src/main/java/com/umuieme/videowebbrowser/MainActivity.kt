@@ -20,7 +20,8 @@ import com.umuieme.videowebbrowser.ui.theme.VideoWebBrowserTheme
  */
 class MainActivity : ComponentActivity() {
 
-    // TEMPORARY (Milestone 2): replaced by real Back handling in Milestone 5.
+    // TEMPORARY (Milestone 2): replaced by real Back handling in Milestone 5. Back while a video
+    // is full screen is handled first by FullscreenBackCallback (added later, so it has priority).
     private val backCallback = TemporaryBackCallback(this)
 
     // Lives as long as the Activity. Screens register key handlers on it while they're shown.

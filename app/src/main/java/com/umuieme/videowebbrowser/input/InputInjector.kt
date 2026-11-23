@@ -6,8 +6,8 @@ import android.view.MotionEvent
 import android.view.View
 
 /**
- * Turns pointer actions into native MotionEvents delivered to a target View: the WebView now,
- * the full-screen video view from Milestone 5 (just assign [target]).
+ * Turns pointer actions into native MotionEvents delivered to a target View: the WebView, or
+ * the full-screen video view while one is showing (RemoteInputLayer reassigns [target]).
  *
  * Why native MotionEvents and not JavaScript `element.dispatchEvent(new MouseEvent(...))`:
  * - **Trusted input.** Chromium treats these exactly like a finger or mouse: the DOM events

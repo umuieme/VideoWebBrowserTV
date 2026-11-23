@@ -33,11 +33,14 @@ fun AppRoot(
             error = state.error,
             onSubmit = viewModel::submitUrl,
             onInputChanged = viewModel::clearSetupError,
+            initialUrl = state.currentUrl,
+            onCancel = if (state.canCancel) viewModel::cancelChangeSite else null,
         )
         is BrowserUiState.Browsing -> BrowserScreen(
             url = state.url,
             keyRouter = keyRouter,
             onWebViewChanged = onWebViewChanged,
+            onChangeSite = viewModel::changeSite,
         )
     }
 }
