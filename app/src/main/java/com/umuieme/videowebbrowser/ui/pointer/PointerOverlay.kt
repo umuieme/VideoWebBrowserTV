@@ -9,6 +9,7 @@ import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.drawscope.rotate
 import androidx.compose.ui.graphics.drawscope.translate
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.runtime.Composable
@@ -21,6 +22,13 @@ private object PointerStyle {
     val RING_START_RADIUS = 6.dp
     val RING_END_RADIUS = 28.dp
     val RING_STROKE = 3.dp
+
+    // Scroll mode: a ring around the tip with a chevron outside it on each side.
+    val SCROLL_RING_RADIUS = 26.dp
+    val SCROLL_RING_STROKE = 3.dp
+    val CHEVRON_GAP = 5.dp
+    val CHEVRON_HALF_WIDTH = 7.dp
+    val CHEVRON_HEIGHT = 7.dp
     val FILL = Color.White
     val DARK = Color(0xFF101010)
 }
@@ -35,9 +43,10 @@ private val ARROW_POINTS = listOf(
 private const val ARROW_DESIGN_HEIGHT = 17.2f
 
 /**
- * Draws the pointer and its click ring above the WebView.
+ * Draws the pointer, its click ring and (in scroll mode) the scroll ring above the WebView.
  *
- * Performance: [PointerState.position] and [PointerState.clickPulse] are read only inside the
+ * Performance: [PointerState.position], [PointerState.clickPulse] and
+ * [PointerState.scrollMode] are read only inside the
  * draw lambda and [PointerState.alpha] only inside graphicsLayer. Compose tracks reads per
  * phase, so changes to them re-run just the draw (or layer) step, never recomposition. The
  * arrow path is built once per size/density in drawWithCache.
@@ -59,8 +68,19 @@ fun PointerOverlay(state: PointerState, modifier: Modifier = Modifier) {
                     close()
                 }
                 val outline = Stroke(width = PointerStyle.OUTLINE.toPx(), join = StrokeJoin.Round)
+                // The "up" chevron, relative to the tip; the other three are this one rotated.
+                val chevronBase = -(PointerStyle.SCROLL_RING_RADIUS + PointerStyle.CHEVRON_GAP).toPx()
+                val chevronHalf = PointerStyle.CHEVRON_HALF_WIDTH.toPx()
+                val chevron = Path().apply {
+                    moveTo(-chevronHalf, chevronBase)
+                    lineTo(0f, chevronBase - PointerStyle.CHEVRON_HEIGHT.toPx())
+                    lineTo(chevronHalf, chevronBase)
+                    close()
+                }
                 onDrawBehind {
                     val tip = Offset(state.position.x.dp.toPx(), state.position.y.dp.toPx())
+                    // Read here (draw phase), like position: toggling only redraws.
+                    if (state.scrollMode) drawScrollRing(tip, chevron, outline)
                     drawClickRing(tip, state.clickPulse.value)
                     translate(tip.x, tip.y) {
                         drawPath(arrow, PointerStyle.FILL)
@@ -69,6 +89,25 @@ fun PointerOverlay(state: PointerState, modifier: Modifier = Modifier) {
                 }
             },
     )
+}
+
+/**
+ * Scroll mode marker: a ring centred on the tip (where wheel events are aimed) and four
+ * chevrons for "arrows scroll in these directions". Dark under white, like the arrow.
+ */
+private fun DrawScope.drawScrollRing(tip: Offset, chevron: Path, outline: Stroke) {
+    val radius = PointerStyle.SCROLL_RING_RADIUS.toPx()
+    val stroke = PointerStyle.SCROLL_RING_STROKE.toPx()
+    drawCircle(PointerStyle.DARK, radius, tip, alpha = 0.6f, style = Stroke(stroke + 2.dp.toPx()))
+    drawCircle(PointerStyle.FILL, radius, tip, style = Stroke(stroke))
+    translate(tip.x, tip.y) {
+        for (degrees in listOf(0f, 90f, 180f, 270f)) {
+            rotate(degrees, pivot = Offset.Zero) {
+                drawPath(chevron, PointerStyle.FILL)
+                drawPath(chevron, PointerStyle.DARK, style = outline)
+            }
+        }
+    }
 }
 
 /** Expanding, fading ring around the tip; dark under white so it shows on any background. */

@@ -15,7 +15,8 @@ fun interface KeyHandler {
  *
  * Handlers form a stack: the most recently registered one is asked first. That covers the
  * brief overlap while one screen leaves and another arrives, and lets an overlay (the app
- * menu, Milestone 6) sit on top of the browser later.
+ * menu, Milestone 7) sit on top of the browser later. Back never comes through here:
+ * MainActivity handles it before the router (hold Back = menu, short press = Back chain).
  *
  * Main thread only, like all key dispatch.
  */

@@ -66,9 +66,11 @@ covers what only a real TV and remote can verify.
 | 2.20c | Press Back on that setup screen (keyboard closed, not editing). | Returns to the browser, which tries the saved URL again (error panel again). |
 | 2.20d | Open "Change site" again, enter a working URL and press Open. Then force-stop and relaunch. | The new site loads, and it is still the one opened after the relaunch. |
 | 2.20e | Open "Change site", press OK on the field, press Back once, then Back again. | The first Back closes the keyboard / stops editing; the second returns to the browser. |
+| 2.20f | Change site to `https://expired.badssl.com`. | "Couldn't load this page" with "…certificate isn't valid for the TV's current date…"; no black screen, and the page is never shown. |
+| 2.20g | Change site to `https://untrusted-root.badssl.com`. | Error panel with "…certificate isn't trusted…". |
 | 2.21 | (Optional, emulator only) Disable "Android System WebView" and launch. | "Web browser component unavailable" with Retry; no crash. |
 
-### Back (temporary, replaced in Milestone 5)
+### Back (basic history and exit; the full Back chain is tested in Milestone 6)
 
 | # | Steps | Expected result |
 |---|-------|-----------------|
@@ -88,7 +90,7 @@ covers what only a real TV and remote can verify.
 Notes:
 - Use the physical remote. Key events from `adb shell input keyevent` carry the virtual-keyboard
   device id, which the app deliberately passes through, so they don't move the pointer.
-- Long-press OK logs only: `adb logcat -s RemoteInputLayer`.
+- Long-press OK toggles scroll mode (tested in Milestone 6).
 - Good test pages: a site with a CSS hover menu (most news/shop sites), a video page whose player
   hides its controls until hovered, and a page with a search box.
 
@@ -101,7 +103,7 @@ Notes:
 | 3.3 | Hold Right for about 2 seconds. | After a short pause the pointer starts slowly, speeds up smoothly over about a second, then glides fast. No stutter. |
 | 3.4 | Hold Left, Up and Down in turn. | Same behaviour in every direction. |
 | 3.5 | Hold Up, then press and hold Right as well. | The pointer moves diagonally up-right at the same speed as a straight move. **Remote limitation:** many TV remotes report only one key at a time; if the pointer just switches to moving right, that is the remote, not the app. |
-| 3.6 | Hold an arrow until the pointer reaches the screen edge; keep holding. | The pointer stops with its tip at the edge and never leaves the screen. Nothing else happens yet (edge scrolling is planned for Milestone 5). |
+| 3.6 | Hold an arrow until the pointer reaches the screen edge; keep holding. | The pointer stops with its tip at the edge and never leaves the screen. (Since Milestone 6 the page also scrolls in that direction; see 6.13.) |
 | 3.7 | Hold an arrow, then release it. | The pointer stops immediately; it does not drift. |
 | 3.8 | Hold an arrow and press Home while holding; release; reopen the app. | The pointer is not moving on return. |
 
@@ -118,7 +120,7 @@ Notes:
 | 3.15 | Type a word with the keyboard and submit (Go/Search key). | The text appears in the field and the search runs. |
 | 3.16 | With the keyboard open, use the arrows. | The arrows move within the keyboard, not the pointer. |
 | 3.17 | Press Back to close the keyboard, then move the pointer and click the field again. | The pointer moves normally after the keyboard closes; clicking reopens the keyboard. |
-| 3.18 | Hold OK for about 1 second, then release. | No click happens. Logcat shows `Long-press OK`. |
+| 3.18 | Hold OK for about 1 second, then release. | No click happens; scroll mode starts (ring around the pointer, see 6.1). Press OK to leave it. |
 | 3.19 | Click a link and wait for the new page to load. | The pointer is still where it was before the page changed (not re-centred). |
 
 ### Auto-hide
@@ -138,7 +140,7 @@ Notes:
 | 3.25 | On the setup screen, highlight "Open" with a valid URL and press OK. | The site opens; the OK release does **not** click anything on the new page. |
 | 3.26 | Trigger a load error (as in 2.18). | Error panel with no pointer; Retry is focused and OK presses it. |
 | 3.27 | After Retry succeeds. | The pointer is back, at the position it had before the error. |
-| 3.28 | On any page, press Back. | Back behaves exactly as in 2.22–2.25 (pointer mode doesn't touch Back). |
+| 3.28 | On any page without a popup, press Back. | Back behaves exactly as in 2.22–2.25. |
 
 ## Milestone 4: Video playback
 
@@ -229,3 +231,139 @@ Set the TV's screensaver to its shortest delay first (Settings › System › Am
 | # | Steps | Expected result |
 |---|-------|-----------------|
 | 4.28 | With a page open on an emulator: `adb root`, then `adb shell pkill -f sandboxed_process`. | "This page stopped working" with Retry focused; the app does not crash. Retry loads the page in a new WebView. |
+
+## Milestone 5: Navigation policy and ad blocking
+
+Notes:
+- Policy decisions (debug build): `adb logcat -s VWB-Policy`. Lines look like
+  `blocked NoGesture: https://…`, `blocked PopUp: …`, `blocked UnsupportedScheme: intent://…`.
+- Ad blocking (debug build): `adb logcat -s VWB-AdBlock`. At launch: `Loaded 76104 ad domains in … ms`.
+  After each page: `blocked N ad requests on <url>` (in the `VWB-Policy` tag).
+- "Home site" below means the site set at first run. Reset the allowlist with `pm clear` (this also
+  clears the home site).
+- Handy pages for the generic cases: `https://www.w3schools.com/jsref/tryit.asp?filename=tryjsref_win_open`
+  (window.open on click), `https://www.w3schools.com/tags/tryit.asp?filename=tryhtml_a_target`
+  (target=_blank), and any page with an `intent://` or Play Store link.
+
+### Pop-ups
+
+| # | Steps | Expected result |
+|---|-------|-----------------|
+| 5.1 | On a video page of the home site whose first click opens an ad pop-up, click the play button. | No new page appears; the video page stays. Hint at the top: "Blocked: <ad domain>" for about 2.5 s. Logcat: `blocked PopUp`. A second click plays the video. |
+| 5.2 | Click a link on the home site that opens in a new tab (target=_blank) to another page **of the same site**. | The page opens in place of the current one (no hint). Back returns to the previous page. |
+| 5.3 | On the w3schools window.open demo, click "Try it" (it opens a cross-site page). | Nothing opens; hint "Blocked: w3schools.com" (or the target's domain). No question is asked for pop-ups. |
+| 5.4 | Leave a page open that tries to open pop-ups on a timer (many ad-heavy sites do). | Nothing ever opens and no hint appears (WebView drops script-only pop-ups before the app sees them). |
+
+### Redirects
+
+| # | Steps | Expected result |
+|---|-------|-----------------|
+| 5.5 | On a page of the home site that redirects to an ad by script after a few seconds (no click), wait. | The page stays; hint "Blocked: <domain>". Logcat: `blocked NoGesture`. |
+| 5.6 | Click a home-site link that goes through a cross-site tracking redirect (link → `tracker.example` → target). | The redirect hop is blocked with a hint (`blocked Redirect`), or the dialog asks about the first hop's domain (5.8). Never lands silently on another site. |
+| 5.7 | Set the home URL to a site that redirects to another domain on load (e.g. `http://` → `https://www.` of a different TLD), relaunch. | The site loads normally (trusted redirect of the app's own load), and links within the landed site open without asking. |
+
+### Ask before leaving the site
+
+| # | Steps | Expected result |
+|---|-------|-----------------|
+| 5.8 | Click a link to another site (e.g. a "Contact us on Facebook" link). | Dialog: "facebook.com wants to open" with Allow once / Always allow / Block. **Block** is focused. The pointer disappears while the dialog is open. |
+| 5.9 | In the dialog, press Left/Right several times. | Focus moves between the three buttons; arrows don't move a pointer or reach the page. Up/Down don't leave the dialog. |
+| 5.10 | Press OK on Block. | The dialog closes; the page didn't change. The pointer is back where it was and works. |
+| 5.11 | Click the link again, press Back. | Same as Block: dialog closes, page unchanged, the app does not navigate back or exit. |
+| 5.12 | Click the link again, choose **Allow once**. | The other site opens. Links within it open without asking. Back returns to the home site. |
+| 5.13 | Force-stop and relaunch; click the same link. | The dialog appears again (allow once lasts only for this app session). |
+| 5.14 | Choose **Always allow**. Force-stop, relaunch, click the link. | The site opens without asking. Its ads are no longer blocked either (allowlisted domains are exempt). |
+| 5.15 | While a dialog is open, wait for a page script to trigger another cross-site click navigation (hard to force; skip if not reproducible). | The first dialog stays; the second is blocked with a hint. |
+| 5.16 | With a video playing inline, click a cross-site link and choose Block. | The video keeps playing; OK/Play-Pause still control it after the dialog closes. |
+
+### Other schemes and downloads
+
+| # | Steps | Expected result |
+|---|-------|-----------------|
+| 5.17 | Click an `intent://` link (e.g. an "Open in app" banner) and a Play Store (`market://`) link. | Nothing happens: no error page, no Play Store, no hint. Logcat: `blocked UnsupportedScheme`. |
+| 5.18 | Click a `tel:` or `mailto:` link. | Nothing happens. |
+| 5.19 | Click a download link (an `.apk`, `.zip` or `.pdf`, or a fake "Download player" button). | Nothing downloads; hint "Download blocked". |
+| 5.20 | Open a page that asks for your location (e.g. `https://browserleaks.com/geo`). | No prompt; the page reports that location is denied/unavailable. |
+
+### Video players and Milestone 4 regression
+
+| # | Steps | Expected result |
+|---|-------|-----------------|
+| 5.21 | Open the cross-origin iframe test page (4.18) and play the embedded video. | It loads and plays; no hint. Play/Pause works and Logcat `VWB-Media` shows `-> Agent` (the media agent is unaffected). |
+| 5.22 | On your own site, play a video, enter full screen, use OK, Left/Right, Up + Back, Back. | Same behaviour as 4.6–4.14. |
+| 5.23 | Play the Widevine asset on the Shaka demo (4.26). | It plays. |
+
+### Ad blocking
+
+| # | Steps | Expected result |
+|---|-------|-----------------|
+| 5.24 | Launch the app and check Logcat `VWB-AdBlock`. | `Loaded … ad domains in … ms` appears within a second or two of launch. |
+| 5.25 | Load an ad-heavy page of the home site. Compare with the same page in a build from Milestone 4 (or in the TV's other browser). | Fewer or no banner ads; the page becomes usable noticeably faster. Empty gaps where ads were are normal. `blocked N ad requests` with N > 0. |
+| 5.26 | Browse the home site normally for a few minutes: menus, search, logins, video pages. | Everything the site itself needs still works (the home domain is never blocked, even if listed). |
+| 5.27 | Watch memory: `adb shell dumpsys meminfo com.umuieme.videowebbrowser` (Java Heap). | Roughly 6 MB more Java heap than in Milestone 4 (the ad list), constant over time. |
+
+## Milestone 6: Scroll mode and Back handling
+
+Notes:
+- Use the physical remote (see Milestone 3 notes about `adb shell input`). Short Back presses from
+  `adb shell input keyevent KEYCODE_BACK` do work for the Back chain cases.
+- Scroll target log (debug build): `adb logcat -s VWB-Scroll`. One line per scroll gesture:
+  `target Point|Modal|Page at Vec2(...)`, or `pointer (no answer)` if the page didn't answer in time.
+- Test pages:
+  - **Site dialog with a scrolling body:** Bootstrap's demo, `https://getbootstrap.com/docs/5.3/components/modal/`,
+    "Scrolling long content" → "Launch demo modal". Most sites' cookie/consent dialogs also work.
+  - **Horizontal thumbnail row:** your own site's rows, or any streaming/shop site with carousels.
+  - **Cross-origin embedded page:** `https://www.w3schools.com/html/html_iframe.asp` ("Try it" pages
+    embed scrollable iframes), or an embedded map/document on any site.
+  - **Popup closed only by Escape:** `https://www.w3schools.com/howto/howto_css_modals.asp` has a modal
+    with a × button (button path); for an Escape-only popup, use a site whose search overlay or
+    lightbox has no close button (many image galleries).
+
+### Scroll mode
+
+| # | Steps | Expected result |
+|---|-------|-----------------|
+| 6.1 | On any page, hold OK for about half a second. | Scroll mode starts while OK is still held: a white ring with four small arrows appears around the pointer tip. Releasing OK does **not** click. |
+| 6.2 | In scroll mode, leave the remote alone for 10 seconds. | The ring and pointer stay visible (no auto-hide in scroll mode). |
+| 6.3 | Press OK. | Scroll mode ends (ring gone), nothing is clicked. Arrows move the pointer again. |
+| 6.4 | Enter scroll mode again, then hold OK again. | Scroll mode ends on the press (toggle). Releasing OK does not click or re-enter scroll mode. |
+| 6.5 | Enter scroll mode, press Back. | Scroll mode ends; the page does **not** go back. |
+| 6.6 | In scroll mode on a long page, tap Down once, then Up once. | Each tap scrolls about a third of the screen, smoothly, then stops. |
+| 6.7 | Hold Down for 3 seconds. | First the tap step, then after a short pause continuous scrolling that speeds up smoothly over about a second. Stops immediately on release. |
+| 6.8 | Compare: five quick taps vs. a 2-second hold. | Taps give predictable equal steps; the hold covers much more distance. |
+| 6.9 | Open the Bootstrap scrolling modal. Put the pointer **over** the dialog's text, enter scroll mode, scroll Down/Up. | The dialog's content scrolls, not the page behind it. Logcat: `target Point`. |
+| 6.10 | Same dialog, pointer **outside** it (on the dark backdrop), scroll Down. | The dialog's content scrolls anyway. Logcat: `target Modal`. |
+| 6.11 | On a horizontal thumbnail row, put the pointer on the row, enter scroll mode, tap and hold Right, then Left. | The row scrolls sideways in the pressed direction, not the page. (If it scrolls the opposite way, note it: one constant `HSCROLL_SIGN` flips it.) |
+| 6.12 | Pointer over an embedded cross-origin page/iframe that can scroll; scroll mode, Down. | The embedded page scrolls. When it reaches its end, further scrolling continues on the outer page (scroll chaining). |
+| 6.13 | Pointer mode (no ring): hold Down until the pointer hits the bottom edge; keep holding. | The page scrolls down, starting gently and speeding up. Same for the top edge (Up), and Left/Right on pages that scroll sideways. Releasing stops it. |
+| 6.14 | Enter full screen video, hold OK. | Nothing changes (no scroll mode over full-screen video); OK toggles play/pause as before. |
+| 6.15 | While a video is playing inline, enter scroll mode and press Play/Pause. | The video pauses/resumes (media keys work in scroll mode). |
+
+### Back order
+
+Back goes through these steps, highest first; each press does only the first one that applies:
+scroll mode → pointer over full-screen video → full screen → site popup → page history → exit.
+
+| # | Steps | Expected result |
+|---|-------|-----------------|
+| 6.16 | Open the Bootstrap demo modal. Enter scroll mode. Press Back four times slowly, starting on a page you navigated to from another page. | 1st: scroll mode ends (modal stays). 2nd: the modal closes (its close button). 3rd: the previous page. 4th (on the first page): "Press Back again to exit". |
+| 6.17 | In full screen video with the pointer shown (Up), press Back three times. | 1st: pointer hides (video control). 2nd: full screen closes. 3rd: normal page Back (popup / history). |
+| 6.18 | On the w3schools modal page, open the modal and press Back. | The modal closes (× button); the page does not navigate. |
+| 6.19 | Open a popup that has no close button and only closes with Escape; press Back. | The popup closes (native Escape). |
+| 6.20 | Find a popup that ignores Back completely (fake close button, or no reaction to Escape). Press Back, then Back again within 2 seconds. | 1st: nothing visible happens (the attempt failed). 2nd: the page goes back in history (or the exit toast on the first page). Back never stays stuck on the popup. |
+| 6.21 | Same popup, press Back, wait more than 3 seconds, press Back. | The second press tries closing again (a slow second press counts as a new attempt). A quick third press then goes back. |
+| 6.22 | On a page with no popup, press Back. | History back immediately (no visible delay). |
+| 6.23 | On the first page, press Back twice within 2 s. | Exit, as in 2.24. |
+| 6.24 | With the "leave site" dialog open (5.8), press Back. | The dialog closes as Block (it is above the whole chain). |
+| 6.25 | On a load error panel (2.18), press Back. | History back if there is a previous page, otherwise the exit toast. |
+| 6.26 | Open a text field's keyboard (3.14), press Back. | The keyboard closes; the page does not go back. |
+
+### Hold Back
+
+| # | Steps | Expected result |
+|---|-------|-----------------|
+| 6.27 | On a page, hold Back for about a second. | "Menu coming in Milestone 7" appears in the centre while Back is still held, then fades after about 2.5 s. The page does **not** go back, and no popup is closed. |
+| 6.28 | While the hint is showing, press arrows and OK. | The pointer moves and clicks normally (the hint never takes focus). |
+| 6.29 | Hold Back on the setup screen (`pm clear` first). | The same hint; the app does not exit. |
+| 6.30 | Hold Back for 5 seconds. | The hint appears once; releasing does nothing else. |
+| 6.31 | Tap Back quickly several times on a page with history. | Each tap is one normal Back (no hint). |

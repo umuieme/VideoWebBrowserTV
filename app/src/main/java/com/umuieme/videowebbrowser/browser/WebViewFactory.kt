@@ -9,6 +9,7 @@ import android.webkit.WebSettings
 import android.webkit.WebView
 import com.umuieme.videowebbrowser.BuildConfig
 import com.umuieme.videowebbrowser.browser.media.MediaController
+import com.umuieme.videowebbrowser.browser.policy.NavigationGuard
 
 /**
  * The one place a WebView is created and configured, so every setting is visible together.
@@ -27,17 +28,21 @@ object WebViewFactory {
      * @param context must be the Activity context: the WebView uses it for IME, dialogs and theming.
      * @param fullscreenHost receives full-screen video requests.
      * @param mediaController gets the media agent installed into this WebView.
+     * @param guard navigation policy, pop-up catching and ad-request blocking for this WebView.
+     * @param onDownloadBlocked called when the page starts a download (always ignored).
      */
     fun create(
         context: Context,
         listener: PageListener,
         fullscreenHost: FullscreenHost,
         mediaController: MediaController,
+        guard: NavigationGuard,
+        onDownloadBlocked: () -> Unit,
     ): Result<WebView> =
         try {
             val webView = WebView(context)
             try {
-                webView.configure(listener, fullscreenHost, mediaController)
+                webView.configure(listener, fullscreenHost, mediaController, guard, onDownloadBlocked)
             } catch (e: Exception) {
                 webView.destroy() // Don't leak a half-configured instance.
                 throw e
@@ -54,6 +59,8 @@ object WebViewFactory {
         listener: PageListener,
         fullscreenHost: FullscreenHost,
         mediaController: MediaController,
+        guard: NavigationGuard,
+        onDownloadBlocked: () -> Unit,
     ) {
         settings.apply {
             // Run site JavaScript; video players, menus and most navigation depend on it.
@@ -70,10 +77,15 @@ object WebViewFactory {
             // Some sites still load media or players over http from an https page. Compatibility
             // mode allows the "passive" ones (images, video) and blocks scripts, like Chrome does.
             mixedContentMode = WebSettings.MIXED_CONTENT_COMPATIBILITY_MODE
-            // window.open / target=_blank load in this same WebView instead of needing a second
-            // window we would have to manage. Milestone 6 decides which of those to block.
-            setSupportMultipleWindows(false)
+            // Route window.open / target=_blank through WebChromeClient.onCreateWindow, where
+            // NavigationGuard catches the URL and decides (same site: open here; else: drop).
+            // With this off, they'd silently replace the current page with no policy check.
+            setSupportMultipleWindows(true)
+            // Script can only open windows right after a user gesture; timer- and load-triggered
+            // pop-ups are discarded by WebView itself before reaching onCreateWindow.
             javaScriptCanOpenWindowsAutomatically = false
+            // No location for websites. (onGeolocationPermissionsShowPrompt also denies.)
+            setGeolocationEnabled(false)
             // Pages have no business reading local files or content providers.
             allowFileAccess = false
             allowContentAccess = false
@@ -103,10 +115,16 @@ object WebViewFactory {
 
         webViewClient = BrowserWebViewClient(
             listener = listener,
+            guard = guard,
             calibrationScript = loadCalibrationScript(context),
             onMainFrameStarted = mediaController::onMainFrameNavigation,
         )
-        webChromeClient = BrowserWebChromeClient(listener, fullscreenHost)
+        webChromeClient = BrowserWebChromeClient(listener, fullscreenHost, guard)
+
+        // A link to a file (or a server reply WebView can't display) becomes a download request.
+        // Without a listener WebView silently does nothing; we ignore it too, but say so, because
+        // on video sites "downloads" are almost always fake "player update" APKs.
+        setDownloadListener { _, _, _, _, _ -> onDownloadBlocked() }
     }
 
     private fun loadAsset(context: Context, path: String): String =

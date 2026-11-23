@@ -7,7 +7,10 @@ enum class InputMode {
     /** Arrows move an on-screen pointer, OK clicks at it. Milestone 3. */
     Pointer,
 
-    /** Arrows scroll the element under the pointer (entered with a long OK press). Milestone 5. */
+    /**
+     * Arrows scroll the element under the pointer instead of moving it. Entered and left with a
+     * long OK press; OK or Back also leave it. Milestone 6.
+     */
     Scroll,
 
     /** A video is full screen: OK = play/pause, Left/Right = seek, Up/Down = [FullscreenPointer]. */
@@ -43,8 +46,18 @@ sealed interface InputCommand {
     /** Short OK press finished (emitted on key UP). */
     data object Click : InputCommand
 
-    /** OK has been held for [InputTuning.LONG_PRESS_MS]. Emitted once, while still held. */
-    data object LongPressOk : InputCommand
+    /**
+     * The controller switched between [InputMode.Pointer] and [InputMode.Scroll] itself (long OK,
+     * or OK in scroll mode). Full-screen switches are driven from outside and don't emit this.
+     */
+    data class ModeChanged(val mode: InputMode) : InputCommand
+
+    /**
+     * Scroll mode: the first arrow went down while none was held. The UI locates the scroll
+     * target once here and keeps it until every arrow is released. Followed by a
+     * [DirectionsChanged] with the same set.
+     */
+    data class ScrollGestureStarted(val held: Set<Direction>) : InputCommand
 
     /** Control the active video. */
     data class Media(val action: MediaAction) : InputCommand
@@ -106,26 +119,26 @@ class RemoteInputController(
     fun onKeyDown(key: RemoteKey, timeMs: Long, isRepeat: Boolean = false): KeyResult {
         // Media keys mean the same thing in every mode that handles keys at all.
         key.toMediaAction()?.let { action ->
-            if (mode == InputMode.Scroll || mode == InputMode.DPad) return KeyResult.NotConsumed
+            if (mode == InputMode.DPad) return KeyResult.NotConsumed
             return if (isRepeat) KeyResult.ConsumedNoOp else KeyResult(true, listOf(InputCommand.Media(action)))
         }
         return when (mode) {
             InputMode.Pointer, InputMode.FullscreenPointer -> pointerKeyDown(key, timeMs, isRepeat)
             InputMode.FullscreenVideo -> videoKeyDown(key, timeMs, isRepeat)
-            // Extension points: until a mode is implemented, keys pass through to the page.
-            InputMode.Scroll -> KeyResult.NotConsumed // Milestone 5
+            InputMode.Scroll -> scrollKeyDown(key, isRepeat)
+            // Extension point: until D-pad mode is implemented, keys pass through to the page.
             InputMode.DPad -> KeyResult.NotConsumed // Milestone 7
         }
     }
 
     fun onKeyUp(key: RemoteKey, timeMs: Long): KeyResult {
         if (key.toMediaAction() != null) {
-            return if (mode == InputMode.Scroll || mode == InputMode.DPad) KeyResult.NotConsumed else KeyResult.ConsumedNoOp
+            return if (mode == InputMode.DPad) KeyResult.NotConsumed else KeyResult.ConsumedNoOp
         }
         return when (mode) {
             InputMode.Pointer, InputMode.FullscreenPointer -> pointerKeyUp(key, timeMs)
             InputMode.FullscreenVideo -> videoKeyUp(key)
-            InputMode.Scroll -> KeyResult.NotConsumed // Milestone 5
+            InputMode.Scroll -> scrollKeyUp(key)
             InputMode.DPad -> KeyResult.NotConsumed // Milestone 7
         }
     }
@@ -136,8 +149,9 @@ class RemoteInputController(
         val longPressAt = okDownAtMs?.takeIf { !longPressFired }?.plus(longPressMs)
         if (longPressAt != null && nowMs >= longPressAt) {
             longPressFired = true
-            // Long press only means something in pointer mode (scroll mode, Milestone 5).
-            if (mode == InputMode.Pointer) commands += InputCommand.LongPressOk
+            // Long press only means something in pointer mode. Entering scroll mode while OK is
+            // still held: its repeats and UP then arrive in scroll mode, which ignores them.
+            if (mode == InputMode.Pointer) commands += enterScroll()
         }
         val seekAt = nextSeekAtMs
         if (seekAt != null && nowMs >= seekAt && seekSign != 0) {
@@ -182,14 +196,22 @@ class RemoteInputController(
         if (mode.isFullscreen) switchMode(InputMode.Pointer) else emptyList()
 
     /**
-     * Back while full screen is showing. Consumed (with commands) when Back only steps from the
-     * pointer back to video control; not consumed when the caller should exit full screen.
+     * Back while the pointer is over a full-screen video: hide it and return to video control.
+     * No-op in any other mode (exiting full screen itself is the caller's job).
      */
-    fun onFullscreenBack(): KeyResult = when (mode) {
-        InputMode.FullscreenPointer ->
-            KeyResult(true, switchMode(InputMode.FullscreenVideo) + InputCommand.PointerVisibility(false))
-        else -> KeyResult.NotConsumed
-    }
+    fun fullscreenPointerBack(): List<InputCommand> =
+        if (mode == InputMode.FullscreenPointer) {
+            switchMode(InputMode.FullscreenVideo) + InputCommand.PointerVisibility(false)
+        } else {
+            emptyList()
+        }
+
+    /** Leaves scroll mode for the pointer (Back, or OK). No-op outside scroll mode. */
+    fun exitScroll(): List<InputCommand> =
+        if (mode == InputMode.Scroll) switchMode(InputMode.Pointer) + InputCommand.ModeChanged(InputMode.Pointer) else emptyList()
+
+    private fun enterScroll(): List<InputCommand> =
+        switchMode(InputMode.Scroll) + InputCommand.ModeChanged(InputMode.Scroll)
 
     // --- Pointer mode (also the pointer over a full-screen video) ---
 
@@ -225,16 +247,51 @@ class RemoteInputController(
                 okDownAtMs = null
                 longPressFired = false
                 val isLong = alreadyFired || timeMs - downAt >= longPressMs
-                val command = when {
-                    // Long press has no meaning over a full-screen video; just don't click.
-                    isLong && mode == InputMode.FullscreenPointer -> null
-                    alreadyFired -> null
+                val commands = when {
+                    // Already handled while held (or a long press over full-screen video, which
+                    // means nothing): just don't click.
+                    alreadyFired -> emptyList()
                     // The tick may run late; the UP's timestamp decides, so results are deterministic.
-                    isLong -> InputCommand.LongPressOk
-                    else -> InputCommand.Click
+                    isLong && mode == InputMode.Pointer -> enterScroll()
+                    isLong -> emptyList()
+                    else -> listOf(InputCommand.Click)
                 }
-                KeyResult(consumed = true, commands = listOfNotNull(command))
+                KeyResult(consumed = true, commands = commands)
             }
+            else -> KeyResult.NotConsumed
+        }
+    }
+
+    // --- Scroll mode ---
+
+    private fun scrollKeyDown(key: RemoteKey, isRepeat: Boolean): KeyResult {
+        val direction = key.toDirection()
+        return when {
+            direction != null -> {
+                if (isRepeat && direction !in held) return KeyResult.ConsumedNoOp
+                val startsGesture = held.isEmpty()
+                if (!held.add(direction)) return KeyResult.ConsumedNoOp
+                val snapshot = held.toSet()
+                val commands = buildList {
+                    if (startsGesture) add(InputCommand.ScrollGestureStarted(snapshot))
+                    add(InputCommand.DirectionsChanged(snapshot))
+                }
+                KeyResult(consumed = true, commands = commands)
+            }
+            // Acts on DOWN so leaving feels instant; the UP then arrives in pointer mode as an
+            // UP-without-DOWN and is ignored. Repeats belong to the OK that *entered* scroll mode
+            // (still held after the long press) and must not leave it again.
+            key == RemoteKey.Ok -> if (isRepeat) KeyResult.ConsumedNoOp else KeyResult(true, exitScroll())
+            else -> KeyResult.NotConsumed
+        }
+    }
+
+    private fun scrollKeyUp(key: RemoteKey): KeyResult {
+        val direction = key.toDirection()
+        return when {
+            direction != null -> if (held.remove(direction)) changed() else KeyResult.ConsumedNoOp
+            // The UP of the OK that entered scroll mode.
+            key == RemoteKey.Ok -> KeyResult.ConsumedNoOp
             else -> KeyResult.NotConsumed
         }
     }

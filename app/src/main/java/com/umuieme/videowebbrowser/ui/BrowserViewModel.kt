@@ -9,13 +9,20 @@ import com.umuieme.videowebbrowser.VideoWebBrowserApp
 import com.umuieme.videowebbrowser.browser.UrlError
 import com.umuieme.videowebbrowser.browser.UrlNormalizer
 import com.umuieme.videowebbrowser.browser.UrlResult
+import com.umuieme.videowebbrowser.browser.policy.SitePermissions
 import com.umuieme.videowebbrowser.data.SettingsRepository
+import com.umuieme.videowebbrowser.input.InputTuning
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlin.time.Duration.Companion.milliseconds
 
 /**
  * The app's single ViewModel. Turns the saved home URL into a [BrowserUiState] and handles
@@ -46,6 +53,29 @@ class BrowserViewModel(private val settings: SettingsRepository) : ViewModel() {
             initialValue = BrowserUiState.Loading,
         )
 
+    // "Allow once" domains. In memory only: kept across configuration changes (the ViewModel
+    // survives those), forgotten when the process ends. That is the "session".
+    private val allowedOnce = MutableStateFlow<Set<String>>(emptySet())
+
+    /**
+     * The user's per-site choices for the navigation policy. Started eagerly (not
+     * WhileSubscribed) so the allowlist is already read from disk by the time the user clicks
+     * the first link; it's a tiny set, so keeping it hot costs nothing.
+     */
+    val sitePermissions: StateFlow<SitePermissions> =
+        combine(settings.allowedDomains, allowedOnce) { allowlist, once -> SitePermissions(allowlist, once) }
+            .stateIn(viewModelScope, SharingStarted.Eagerly, SitePermissions())
+
+    /**
+     * The user answered "Allow once" ([always] = false) or "Always allow" for [domain]. The
+     * domain is added to the session set in both cases, so it applies immediately even before
+     * DataStore finishes writing.
+     */
+    fun allowSite(domain: String, always: Boolean) {
+        allowedOnce.update { it + domain }
+        if (always) viewModelScope.launch { settings.addAllowedDomain(domain) }
+    }
+
     /**
      * Validates [input] and saves it. On success we don't change the state ourselves: the
      * repository's Flow emits the new URL and [uiState] becomes Browsing on its own.
@@ -68,6 +98,25 @@ class BrowserViewModel(private val settings: SettingsRepository) : ViewModel() {
     /** Called when the user edits the URL, so a stale error doesn't stay on screen. */
     fun clearSetupError() {
         setupError.value = null
+    }
+
+    private val _menuHintVisible = MutableStateFlow(false)
+    private var menuHintJob: Job? = null
+
+    /**
+     * True for a moment after a long Back press. Placeholder for the app menu (Milestone 7),
+     * which will replace this with real "menu open" state.
+     */
+    val menuHintVisible: StateFlow<Boolean> = _menuHintVisible.asStateFlow()
+
+    /** Hold Back detected. Shows the hint; a second request restarts its timer. */
+    fun onMenuRequested() {
+        menuHintJob?.cancel()
+        _menuHintVisible.value = true
+        menuHintJob = viewModelScope.launch {
+            delay(InputTuning.MENU_HINT_VISIBLE_MS.milliseconds)
+            _menuHintVisible.value = false
+        }
     }
 
     /** Opens the setup screen prefilled with the saved URL, e.g. when that site won't load. */

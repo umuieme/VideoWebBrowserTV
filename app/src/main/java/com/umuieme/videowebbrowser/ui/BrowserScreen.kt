@@ -23,6 +23,7 @@ import androidx.compose.foundation.layout.widthIn
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.Stable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
@@ -57,10 +58,17 @@ import com.umuieme.videowebbrowser.R
 import com.umuieme.videowebbrowser.browser.FullscreenSession
 import com.umuieme.videowebbrowser.browser.FullscreenVideoState
 import com.umuieme.videowebbrowser.browser.PageListener
+import com.umuieme.videowebbrowser.browser.PageScripts
 import com.umuieme.videowebbrowser.browser.WebViewFactory
 import com.umuieme.videowebbrowser.browser.media.MediaController
+import com.umuieme.videowebbrowser.browser.policy.AdBlockerHolder
+import com.umuieme.videowebbrowser.browser.policy.NavigationGuard
+import com.umuieme.videowebbrowser.browser.policy.SitePermissions
 import com.umuieme.videowebbrowser.input.KeyRouter
 import com.umuieme.videowebbrowser.ui.pointer.PointerState
+import com.umuieme.videowebbrowser.ui.policy.LeaveSiteDialog
+import com.umuieme.videowebbrowser.ui.policy.PolicyHintOverlay
+import com.umuieme.videowebbrowser.ui.policy.PolicyUiState
 import com.umuieme.videowebbrowser.ui.video.OsdState
 import com.umuieme.videowebbrowser.ui.video.VideoOsd
 
@@ -69,9 +77,13 @@ import com.umuieme.videowebbrowser.ui.video.VideoOsd
  *
  * @param keyRouter where pointer mode registers for remote keys while the page is shown.
  * @param onWebViewChanged receives the live WebView (or null when it goes away) so the
- *   Activity's Back handling can call canGoBack/goBack.
+ *   Activity's Back handling can close site popups and go back in history.
  * @param onChangeSite offered on every error panel, so a site that never loads can't trap the
  *   user (the URL is saved, so restarting the app would just open it again).
+ * @param sitePermissions latest allowlist and allowed-once sets, from the ViewModel.
+ * @param onAllowSite the user allowed a domain in the ask dialog (`always` = Always allow).
+ * @param adBlockerHolder the app-wide ad list, empty until loaded.
+ * @param pageScripts on-demand page scripts; scroll mode uses the scroll locator.
  */
 @Composable
 fun BrowserScreen(
@@ -79,6 +91,10 @@ fun BrowserScreen(
     keyRouter: KeyRouter,
     onWebViewChanged: (WebView?) -> Unit,
     onChangeSite: () -> Unit,
+    sitePermissions: SitePermissions,
+    onAllowSite: (domain: String, always: Boolean) -> Unit,
+    adBlockerHolder: AdBlockerHolder,
+    pageScripts: PageScripts,
     modifier: Modifier = Modifier,
 ) {
     val context = LocalContext.current
@@ -90,11 +106,17 @@ fun BrowserScreen(
     // references tied to one WebView instance (its custom view, its frames' reply proxies).
     val fullscreen = remember(creationAttempt) { FullscreenVideoState() }
     val mediaController = remember(creationAttempt) { MediaController() }
+    // Navigation policy for this WebView, and the UI state (hint, ask dialog) it drives.
+    val policyUi = remember(creationAttempt) { PolicyUiState() }
+    val guard = remember(creationAttempt) { NavigationGuard(adBlockerHolder, policyUi) }
+    // SideEffect runs after every successful composition, so the guard always sees the
+    // latest allowlist (e.g. after "Always allow" or a change made in settings later).
+    SideEffect { guard.updatePermissions(sitePermissions) }
 
     // Created once per attempt and kept across recompositions. Never create a WebView inside
     // AndroidView's update block or the composable body: that would rebuild it and reload the page.
     val webViewResult = remember(creationAttempt) {
-        WebViewFactory.create(context, pageState, fullscreen, mediaController)
+        WebViewFactory.create(context, pageState, fullscreen, mediaController, guard, policyUi::onDownloadBlocked)
     }
 
     Box(modifier = modifier.fillMaxSize().background(Color.Black)) {
@@ -122,8 +144,8 @@ fun BrowserScreen(
         } else {
             key(webView) {
                 WebViewHost(
-                    webView, url, pageState, fullscreen, mediaController, keyRouter,
-                    onWebViewChanged, onChangeSite,
+                    webView, url, pageState, fullscreen, mediaController, guard, policyUi, keyRouter,
+                    pageScripts, onWebViewChanged, onChangeSite, onAllowSite,
                 )
             }
         }
@@ -137,9 +159,13 @@ private fun BoxScope.WebViewHost(
     pageState: PageState,
     fullscreen: FullscreenVideoState,
     mediaController: MediaController,
+    guard: NavigationGuard,
+    policyUi: PolicyUiState,
     keyRouter: KeyRouter,
+    pageScripts: PageScripts,
     onWebViewChanged: (WebView?) -> Unit,
     onChangeSite: () -> Unit,
+    onAllowSite: (domain: String, always: Boolean) -> Unit,
 ) {
     val lifecycleOwner = LocalLifecycleOwner.current
     val hostView = LocalView.current
@@ -151,6 +177,7 @@ private fun BoxScope.WebViewHost(
     val pointerState = remember(webView) { PointerState() }
     val currentOnWebViewChanged by rememberUpdatedState(onWebViewChanged)
     val error = pageState.mainFrameError
+    val askOpen = policyUi.pendingAsk != null
 
     // Ties the WebView to the Activity lifecycle and destroys it when this screen leaves.
     DisposableEffect(webView, lifecycleOwner) {
@@ -179,6 +206,8 @@ private fun BoxScope.WebViewHost(
             // Never destroy a WebView that is still in full screen: end it first (detaches the
             // custom view and tells WebView).
             fullscreen.exitByUser()
+            // Destroys a pop-up catcher that may still be waiting for its URL.
+            guard.release()
             // Detach first: destroy() on a WebView still attached to a window logs errors
             // and can leak. Then release its renderer and memory.
             (webView.parent as? ViewGroup)?.removeView(webView)
@@ -187,8 +216,9 @@ private fun BoxScope.WebViewHost(
         }
     }
 
-    // Load only when the WebView or the URL changes, not on every recomposition.
-    LaunchedEffect(webView, url) { webView.loadUrl(url) }
+    // Load only when the WebView or the URL changes, not on every recomposition. Through the
+    // guard, so this URL becomes the home site and its server redirects are trusted.
+    LaunchedEffect(webView, url) { guard.loadTrusted(webView, url, isHome = true) }
 
     AndroidView(
         // Return the already-created WebView rather than building one here, so its lifetime
@@ -199,11 +229,15 @@ private fun BoxScope.WebViewHost(
                 post { requestFocus() }
             }
         },
-        // Runs again whenever `error` changes. Hiding the WebView takes it out of D-pad focus
-        // order so the Retry button can't lose focus to it.
+        // Runs again whenever `error` or `askOpen` changes. Hiding the WebView takes it out of
+        // D-pad focus order so the Retry button can't lose focus to it. While the ask dialog is
+        // open the WebView is made unfocusable (which also clears its focus), so D-pad focus
+        // search can only land on the dialog's buttons; afterwards focus comes back here.
         update = { view ->
             view.visibility = if (error == null) View.VISIBLE else View.INVISIBLE
-            if (error == null && !view.hasFocus()) view.requestFocus()
+            view.isFocusable = !askOpen
+            view.isFocusableInTouchMode = !askOpen
+            if (error == null && !askOpen && !view.hasFocus()) view.requestFocus()
         },
         modifier = Modifier.fillMaxSize(),
     )
@@ -230,9 +264,10 @@ private fun BoxScope.WebViewHost(
 
     VideoOsd(state = osd, video = activeVideo, modifier = Modifier.fillMaxSize())
 
-    // Remote input only while the page itself is visible. With the error panel up, the layer
-    // leaves composition, its key handler unregisters, and Retry gets normal D-pad focus.
-    if (error == null) {
+    // Remote input only while the page itself is visible. With the error panel or the ask
+    // dialog up, the layer leaves composition, its key handler unregisters (KeyRouter then has
+    // nothing to offer keys to), and the buttons get normal Compose D-pad focus.
+    if (error == null && !askOpen) {
         RemoteInputLayer(
             webView = webView,
             fullscreen = fullscreen,
@@ -240,17 +275,36 @@ private fun BoxScope.WebViewHost(
             osd = osd,
             state = pointerState,
             keyRouter = keyRouter,
+            pageScripts = pageScripts,
             modifier = Modifier.fillMaxSize(),
         )
-    } else {
+    } else if (error != null) {
         MessagePanel(
             title = stringResource(R.string.browser_load_error_title),
             message = error.description,
             onRetry = {
                 pageState.mainFrameError = null
-                webView.loadUrl(error.failedUrl)
+                guard.loadTrusted(webView, error.failedUrl, isHome = error.failedUrl == url)
             },
             onChangeSite = onChangeSite,
+        )
+    }
+
+    // Policy UI on top of everything: the hint never takes focus; the dialog takes it while open.
+    PolicyHintOverlay(state = policyUi, modifier = Modifier.fillMaxSize())
+    policyUi.pendingAsk?.let { ask ->
+        fun allow(always: Boolean) {
+            policyUi.resolveAsk() ?: return
+            onAllowSite(ask.domain, always)
+            guard.allowOnceNow(ask.domain)
+            guard.loadTrusted(webView, ask.url)
+        }
+        LeaveSiteDialog(
+            domain = ask.domain,
+            onAllowOnce = { allow(always = false) },
+            onAlwaysAllow = { allow(always = true) },
+            onBlock = { policyUi.resolveAsk() },
+            modifier = Modifier.fillMaxSize(),
         )
     }
 }

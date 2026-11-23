@@ -19,8 +19,11 @@
     <string name="webview_unavailable_title">Web browser component unavailable</string>
     <string name="webview_unavailable_message">Android System WebView is missing, disabled or being updated. Wait a minute and try again, or check it under Settings › Apps.</string>
     <string name="back_again_to_exit">Press Back again to exit</string>
+    <string name="menu_coming">Menu coming in Milestone 7</string>
     <string name="renderer_gone_title">This page stopped working</string>
     <string name="renderer_gone_message">The web page crashed or ran out of memory. Press Retry to load it again.</string>
+    <string name="ssl_error_date">The site\'s security certificate isn\'t valid for the TV\'s current date. Check that the TV\'s date and time are correct, then retry.</string>
+    <string name="ssl_error_untrusted">The site\'s security certificate isn\'t trusted, so the connection isn\'t secure.</string>
 
     <!-- Video on-screen display -->
     <string name="osd_playing">▶ Playing</string>
@@ -29,4 +32,13 @@
     <string name="osd_seek_forward">+%1$d s</string>
     <string name="osd_seek_back">−%1$d s</string>
     <string name="osd_time">%1$s / %2$s</string>
+
+    <!-- Navigation policy -->
+    <string name="policy_blocked">Blocked: %1$s</string>
+    <string name="policy_download_blocked">Download blocked</string>
+    <string name="policy_ask_title">%1$s wants to open</string>
+    <string name="policy_ask_message">This link leaves your site. Ads often send you to other sites.</string>
+    <string name="policy_allow_once">Allow once</string>
+    <string name="policy_always_allow">Always allow</string>
+    <string name="policy_block">Block</string>
 </resources>

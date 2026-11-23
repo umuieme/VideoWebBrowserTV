@@ -4,6 +4,7 @@ import android.os.SystemClock
 import android.view.InputDevice
 import android.view.MotionEvent
 import android.view.View
+import android.view.ViewConfiguration
 
 /**
  * Turns pointer actions into native MotionEvents delivered to a target View: the WebView, or
@@ -85,6 +86,47 @@ class InputInjector(target: View? = null) {
         dispatchHover(view, MotionEvent.ACTION_HOVER_MOVE, nowMs, x, y)
     }
 
+    /**
+     * Mouse-wheel scroll at ([x], [y]) by [vertical] / [horizontal] px (positive = down / right,
+     * like `scrollBy`).
+     *
+     * Why native wheel events and not JavaScript `element.scrollBy()`:
+     * - **Cross-origin iframes.** The browser engine hit-tests the event and scrolls whatever is
+     *   under (x, y), including an embedded page from another domain our JS can't touch.
+     * - **Natural scroll chaining.** An inner list at its end passes the rest of the scroll to its
+     *   parent and finally the page, exactly like a real mouse; JS would have to reimplement that.
+     * - **Trusted.** Pages see a real `wheel` event; lazy-loading lists and carousels that react to
+     *   wheel/scroll input behave as with a mouse. Smooth-scroll animation comes from the engine.
+     *
+     * Units: the wheel axes count "notches". Chromium turns one notch into
+     * [ViewConfiguration.getScaledVerticalScrollFactor] px (horizontal likewise), the same factor
+     * Android's own scroll views use, so dividing by it makes the requested px land as px.
+     */
+    fun scroll(x: Float, y: Float, vertical: Float, horizontal: Float) {
+        val view = target ?: return
+        if (vertical == 0f && horizontal == 0f) return
+        val config = ViewConfiguration.get(view.context)
+        // AXIS_VSCROLL is positive for "wheel up" (content moves down), the opposite of our
+        // convention, so it is negated. AXIS_HSCROLL is positive for "right" per the docs.
+        val vNotches = -vertical / config.scaledVerticalScrollFactor
+        val hNotches = HSCROLL_SIGN * horizontal / config.scaledHorizontalScrollFactor
+        val now = SystemClock.uptimeMillis()
+        val event = obtain(
+            view, MotionEvent.ACTION_SCROLL, now, now, x, y,
+            toolType = MotionEvent.TOOL_TYPE_MOUSE,
+            source = InputDevice.SOURCE_MOUSE,
+            pressure = 0f,
+            vScroll = vNotches,
+            hScroll = hNotches,
+        )
+        try {
+            // Like hover, a scroll is a "generic" motion event, not a touch.
+            view.dispatchGenericMotionEvent(event)
+        } finally {
+            event.recycle()
+        }
+    }
+
     /** Drops the target without sending anything more. Call before the target is destroyed. */
     fun release() {
         pendingUpView?.removeCallbacks(pendingUp)
@@ -142,6 +184,8 @@ class InputInjector(target: View? = null) {
         toolType: Int,
         source: Int,
         pressure: Float,
+        vScroll: Float = 0f,
+        hScroll: Float = 0f,
     ): MotionEvent {
         pointerProperties[0].apply {
             clear()
@@ -155,6 +199,8 @@ class InputInjector(target: View? = null) {
             this.y = y.coerceIn(0f, (view.height - 1).coerceAtLeast(0).toFloat())
             this.pressure = pressure
             size = 1f
+            setAxisValue(MotionEvent.AXIS_VSCROLL, vScroll)
+            setAxisValue(MotionEvent.AXIS_HSCROLL, hScroll)
         }
         return MotionEvent.obtain(
             downTime,
@@ -172,5 +218,13 @@ class InputInjector(target: View? = null) {
             source,
             /* flags = */ 0,
         )
+    }
+
+    private companion object {
+        /**
+         * Multiplier for AXIS_HSCROLL. Android documents positive as "right"; if horizontal rows
+         * scroll the wrong way on the TV, flip this to -1f.
+         */
+        const val HSCROLL_SIGN = 1f
     }
 }

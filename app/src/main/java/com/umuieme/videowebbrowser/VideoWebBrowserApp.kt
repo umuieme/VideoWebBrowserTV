@@ -14,5 +14,8 @@ class VideoWebBrowserApp : Application() {
     override fun onCreate() {
         super.onCreate()
         container = AppContainer(this)
+        // Start parsing the ad list now, in the background, so it's usually ready before the
+        // first page load issues its requests.
+        container.loadAdBlocklist()
     }
 }

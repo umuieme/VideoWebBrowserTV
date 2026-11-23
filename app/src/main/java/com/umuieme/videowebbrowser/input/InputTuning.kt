@@ -30,10 +30,58 @@ object InputTuning {
      */
     const val MAX_FRAME_DT_SEC = 0.05f
 
-    // --- Keys (RemoteInputController) ---
+    // --- Keys (RemoteInputController, BackKeyTracker) ---
 
-    /** OK held at least this long is a long press instead of a click. */
+    /** OK held at least this long is a long press (toggles scroll mode) instead of a click. */
     const val LONG_PRESS_MS = 500L
+
+    /**
+     * Back held at least this long opens the app menu instead of going back. Longer than the OK
+     * long press: an accidental menu is more disruptive than an accidental scroll mode.
+     */
+    const val BACK_LONG_PRESS_MS = 600L
+
+    // --- Scrolling (ScrollPhysics). Distances are fractions of the viewport (the WebView's
+    // height for vertical scrolling, its width for horizontal), so the feel is the same at any
+    // page zoom and screen size. ---
+
+    /** One arrow tap scrolls this fraction of the viewport. 1/3 keeps context on screen. */
+    const val SCROLL_TAP_FRACTION = 1f / 3f
+
+    /**
+     * How long an arrow must be held before continuous scrolling starts. Longer than a typical
+     * tap (~100–200 ms on a remote), so one tap is exactly one step.
+     */
+    const val SCROLL_HOLD_DELAY_SEC = 0.3f
+
+    /** Continuous scroll speed when it starts, in viewports per second. */
+    const val SCROLL_START_SPEED = 0.6f
+
+    /** Top continuous scroll speed, in viewports per second. */
+    const val SCROLL_MAX_SPEED = 2.5f
+
+    /** Time to accelerate from start to top speed (smoothstep curve). */
+    const val SCROLL_RAMP_DURATION_SEC = 1.0f
+
+    /**
+     * How long scroll mode waits for scroll-locator.js before falling back to the pointer
+     * position. The script normally answers within a frame or two.
+     */
+    const val SCROLL_LOCATOR_TIMEOUT_MS = 150L
+
+    // --- Back (PageBackCallback) ---
+
+    /**
+     * If Back finds the same site popup it tried to close within this time, the popup ignored
+     * us (fake close button, Escape not handled): go back in history instead of trying again.
+     */
+    const val POPUP_STUCK_WINDOW_MS = 2_500L
+
+    /** How long Back waits for close-modal.js (a busy page) before acting as if there is no popup. */
+    const val CLOSE_MODAL_TIMEOUT_MS = 1_000L
+
+    /** Second Back within this time exits the app. */
+    const val EXIT_WINDOW_MS = 2_000L
 
     // --- Full-screen video seeking (RemoteInputController) ---
 
@@ -73,4 +121,7 @@ object InputTuning {
 
     /** Duration of the ring pulse drawn on click. */
     const val CLICK_PULSE_MS = 300
+
+    /** How long the "menu coming" hint stays after a long Back press. */
+    const val MENU_HINT_VISIBLE_MS = 2_500L
 }

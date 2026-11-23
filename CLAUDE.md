@@ -19,8 +19,10 @@ public portfolio repo, so code quality, README and CI matter.
 - minSdk 28; compileSdk tracks the latest stable Android release (currently 37);
   latest stable library versions; JDK 17; Gradle Kotlin DSL + version catalog.
 - targetSdk stays 35 for now: with 35, KEYCODE_BACK still reaches dispatchKeyEvent on all
-  devices. Raising to 36 enables predictive back and requires redesigning hold-Back = menu
-  (decide in Milestone 6).
+  devices. Raising to 36 enables predictive back and requires redesigning hold-Back = menu.
+- Back is detected in dispatchKeyEvent for hold-to-open-menu, and short presses are forwarded
+  to OnBackPressedDispatcher. This requires targetSdk 35; raising to 36 (predictive back)
+  needs a redesign.
 - The repo is generic ("tv-web-shell"): the site URL is set at first run, never hardcoded.
 - Only rely on remote keys every remote has: arrows, OK, Back, Play/Pause.
   Hold OK = scroll mode, hold Back = app menu.
@@ -35,11 +37,12 @@ data/ (SettingsRepository), assets/js/.
 1. Skeleton: TV manifest, Gradle config, banner, GitHub repo, CI building the debug APK
 2. Full-screen WebView + first-run URL screen + DataStore settings
 3. Pointer mode
-4. Video playback: full-screen video, media agent (all frames), remote and media keys, OSD,
-   keep screen on, DRM permission, Back in full screen
-5. Scroll mode (JS scroll + swipe fallback), Back handling (close site popups)
-6. Navigation policy (popup/redirect blocking, allowlist), settings screen, menu
-7. Polish: zoom, desktop UA, D-pad mode, icon and banner
+4. Video playback: fullscreen video, player remote controls, media keys,
+   screen-on, DRM permission
+5. Navigation policy: popup/redirect/intent:// blocking, domain allowlist,
+   ad-domain blocking
+6. Scroll mode + Back handling (close site popups, go back, hold Back detection)
+7. Settings screen and menu, zoom, desktop UA, D-pad mode, icon and banner
 8. Tests, signed release workflow (GitHub Releases), README with GIF, tag v1.0
 
 ## How to work with me

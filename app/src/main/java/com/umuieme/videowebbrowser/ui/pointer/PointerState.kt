@@ -38,6 +38,12 @@ class PointerState {
     /** Logical visibility. [alpha] animates towards it. */
     var visible by mutableStateOf(true)
 
+    /**
+     * True in scroll mode: the overlay draws the scroll ring and the pointer never auto-hides
+     * (the user must always see that arrows scroll instead of move).
+     */
+    var scrollMode by mutableStateOf(false)
+
     /** Bumped on every pointer activity; restarts the idle auto-hide timer. */
     var activityCount by mutableIntStateOf(0)
         private set

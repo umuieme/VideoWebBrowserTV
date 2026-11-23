@@ -2,9 +2,10 @@ package com.umuieme.videowebbrowser.input
 
 import com.umuieme.videowebbrowser.input.InputCommand.Click
 import com.umuieme.videowebbrowser.input.InputCommand.DirectionsChanged
-import com.umuieme.videowebbrowser.input.InputCommand.LongPressOk
 import com.umuieme.videowebbrowser.input.InputCommand.Media
+import com.umuieme.videowebbrowser.input.InputCommand.ModeChanged
 import com.umuieme.videowebbrowser.input.InputCommand.PointerVisibility
+import com.umuieme.videowebbrowser.input.InputCommand.ScrollGestureStarted
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
@@ -79,27 +80,31 @@ class RemoteInputControllerTest {
     }
 
     @Test
-    fun `OK held fires LongPressOk at the deadline and no click on release`() {
+    fun `OK held enters scroll mode at the deadline, and its repeats and release are ignored`() {
         controller.onKeyDown(RemoteKey.Ok, 1_000)
         assertEquals(1_500L, controller.nextDeadlineMs)
 
         assertTrue(controller.onTick(1_499).isEmpty())
-        assertEquals(listOf(LongPressOk), controller.onTick(1_500))
+        assertEquals(listOf(ModeChanged(InputMode.Scroll)), controller.onTick(1_500))
+        assertEquals(InputMode.Scroll, controller.mode)
         assertNull(controller.nextDeadlineMs)
         assertTrue(controller.onTick(1_600).isEmpty()) // fires only once
 
+        // Still holding OK: repeats must not leave scroll mode again.
+        assertEquals(KeyResult.ConsumedNoOp, controller.onKeyDown(RemoteKey.Ok, 1_700, isRepeat = true))
         val up = controller.onKeyUp(RemoteKey.Ok, 2_000)
-        assertTrue(up.consumed)
-        assertTrue(up.commands.isEmpty())
+        assertEquals(KeyResult.ConsumedNoOp, up)
+        assertEquals(InputMode.Scroll, controller.mode)
     }
 
     @Test
     fun `late tick - the key up timestamp decides long press`() {
         controller.onKeyDown(RemoteKey.Ok, 0)
-        assertEquals(listOf(LongPressOk), controller.onKeyUp(RemoteKey.Ok, 500).commands)
+        assertEquals(listOf(ModeChanged(InputMode.Scroll)), controller.onKeyUp(RemoteKey.Ok, 500).commands)
 
-        controller.onKeyDown(RemoteKey.Ok, 1_000)
-        assertEquals(listOf(Click), controller.onKeyUp(RemoteKey.Ok, 1_499).commands)
+        val other = RemoteInputController(longPressMs = 500)
+        other.onKeyDown(RemoteKey.Ok, 1_000)
+        assertEquals(listOf(Click), other.onKeyUp(RemoteKey.Ok, 1_499).commands)
     }
 
     @Test
@@ -149,13 +154,109 @@ class RemoteInputControllerTest {
     }
 
     @Test
-    fun `unimplemented modes pass keys through`() {
-        for (mode in listOf(InputMode.Scroll, InputMode.DPad)) {
-            val c = RemoteInputController(initialMode = mode)
-            assertFalse(c.onKeyDown(RemoteKey.Up, 0).consumed)
-            assertFalse(c.onKeyUp(RemoteKey.Ok, 0).consumed)
-            assertFalse(c.onKeyDown(RemoteKey.PlayPause, 0).consumed)
-        }
+    fun `D-pad mode (not implemented yet) passes keys through`() {
+        val c = RemoteInputController(initialMode = InputMode.DPad)
+        assertFalse(c.onKeyDown(RemoteKey.Up, 0).consumed)
+        assertFalse(c.onKeyUp(RemoteKey.Ok, 0).consumed)
+        assertFalse(c.onKeyDown(RemoteKey.PlayPause, 0).consumed)
+    }
+
+    // --- Scroll mode ---
+
+    private fun enterScrollMode(c: RemoteInputController = controller) {
+        c.onKeyDown(RemoteKey.Ok, 0)
+        c.onTick(500)
+        c.onKeyUp(RemoteKey.Ok, 600)
+        assertEquals(InputMode.Scroll, c.mode)
+    }
+
+    @Test
+    fun `long OK entering scroll mode releases arrows held in pointer mode`() {
+        controller.onKeyDown(RemoteKey.Left, 0)
+        controller.onKeyDown(RemoteKey.Ok, 10)
+        assertEquals(listOf(DirectionsChanged(emptySet()), ModeChanged(InputMode.Scroll)), controller.onTick(510))
+    }
+
+    @Test
+    fun `first arrow starts a gesture, later arrows only change directions`() {
+        enterScrollMode()
+        val first = controller.onKeyDown(RemoteKey.Down, 1_000)
+        assertTrue(first.consumed)
+        assertEquals(
+            listOf(ScrollGestureStarted(setOf(Direction.Down)), DirectionsChanged(setOf(Direction.Down))),
+            first.commands,
+        )
+        assertEquals(
+            listOf(DirectionsChanged(setOf(Direction.Down, Direction.Right))),
+            controller.onKeyDown(RemoteKey.Right, 1_100).commands,
+        )
+        assertTrue(controller.onKeyDown(RemoteKey.Down, 1_400, isRepeat = true).commands.isEmpty())
+        // Right still held: same gesture, no new start.
+        assertEquals(listOf(DirectionsChanged(setOf(Direction.Right))), controller.onKeyUp(RemoteKey.Down, 1_500).commands)
+        assertEquals(listOf(DirectionsChanged(emptySet())), controller.onKeyUp(RemoteKey.Right, 1_600).commands)
+
+        // All released: the next arrow is a new gesture.
+        assertEquals(
+            listOf(ScrollGestureStarted(setOf(Direction.Up)), DirectionsChanged(setOf(Direction.Up))),
+            controller.onKeyDown(RemoteKey.Up, 2_000).commands,
+        )
+    }
+
+    @Test
+    fun `OK in scroll mode exits on key down and its release is ignored in pointer mode`() {
+        enterScrollMode()
+        controller.onKeyDown(RemoteKey.Up, 1_000)
+        val down = controller.onKeyDown(RemoteKey.Ok, 1_100)
+        assertEquals(listOf(DirectionsChanged(emptySet()), ModeChanged(InputMode.Pointer)), down.commands)
+        assertEquals(InputMode.Pointer, controller.mode)
+        // No click and no new long press from that OK.
+        assertEquals(KeyResult.ConsumedNoOp, controller.onKeyUp(RemoteKey.Ok, 1_200))
+        assertNull(controller.nextDeadlineMs)
+    }
+
+    @Test
+    fun `long OK in scroll mode also exits`() {
+        enterScrollMode()
+        controller.onKeyDown(RemoteKey.Ok, 1_000)
+        assertEquals(InputMode.Pointer, controller.mode)
+        // Held on: the long press must not re-enter scroll mode with the same OK.
+        assertTrue(controller.onTick(1_600).isEmpty())
+        assertEquals(KeyResult.ConsumedNoOp, controller.onKeyUp(RemoteKey.Ok, 2_000))
+        assertEquals(InputMode.Pointer, controller.mode)
+    }
+
+    @Test
+    fun `exitScroll (Back) returns to pointer mode, and is a no-op elsewhere`() {
+        assertTrue(controller.exitScroll().isEmpty())
+        enterScrollMode()
+        controller.onKeyDown(RemoteKey.Right, 1_000)
+        assertEquals(listOf(DirectionsChanged(emptySet()), ModeChanged(InputMode.Pointer)), controller.exitScroll())
+        assertEquals(InputMode.Pointer, controller.mode)
+        assertEquals(KeyResult.ConsumedNoOp, controller.onKeyUp(RemoteKey.Right, 1_100))
+    }
+
+    @Test
+    fun `media keys work in scroll mode`() {
+        enterScrollMode()
+        assertEquals(listOf(Media(MediaAction.TogglePlay)), controller.onKeyDown(RemoteKey.PlayPause, 1_000).commands)
+        assertEquals(KeyResult.ConsumedNoOp, controller.onKeyUp(RemoteKey.PlayPause, 1_050))
+    }
+
+    @Test
+    fun `long OK does nothing in full-screen video modes`() {
+        controller.enterFullscreen()
+        controller.onKeyDown(RemoteKey.Ok, 0) // toggles play in video control
+        assertTrue(controller.onTick(600).isEmpty())
+        assertEquals(InputMode.FullscreenVideo, controller.mode)
+    }
+
+    @Test
+    fun `full screen starting while scrolling leaves scroll mode`() {
+        enterScrollMode()
+        controller.onKeyDown(RemoteKey.Down, 1_000)
+        controller.enterFullscreen()
+        assertEquals(InputMode.FullscreenVideo, controller.mode)
+        assertTrue(controller.exitScroll().isEmpty())
     }
 
     // --- Full-screen video ---
@@ -273,17 +374,16 @@ class RemoteInputControllerTest {
         controller.onKeyDown(RemoteKey.Up, 0)
         controller.onKeyDown(RemoteKey.Left, 10) // moving when Back arrives
 
-        val back = controller.onFullscreenBack()
-        assertTrue(back.consumed)
-        assertEquals(listOf(DirectionsChanged(emptySet()), PointerVisibility(false)), back.commands)
+        val back = controller.fullscreenPointerBack()
+        assertEquals(listOf(DirectionsChanged(emptySet()), PointerVisibility(false)), back)
         assertEquals(InputMode.FullscreenVideo, controller.mode)
     }
 
     @Test
-    fun `back in video control is left to the caller to exit full screen`() {
+    fun `fullscreenPointerBack is a no-op in video control (exiting is the caller's job)`() {
         controller.enterFullscreen()
         controller.onKeyDown(RemoteKey.Right, 0)
-        assertFalse(controller.onFullscreenBack().consumed)
+        assertTrue(controller.fullscreenPointerBack().isEmpty())
         assertEquals(InputMode.FullscreenVideo, controller.mode)
     }
 
